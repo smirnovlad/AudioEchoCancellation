@@ -37,7 +37,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 # Проверка доступности WebRTC
 try:
-    import webrtc_audio_processing
+    import aec.webrtc_audio_processing
     logging.info("webrtc_audio_processing успешно импортирован")
 except ImportError:
     logging.error("Не удалось импортировать webrtc_audio_processing. Установите пакет: pip install webrtc_audio_processing")
@@ -45,7 +45,7 @@ except ImportError:
 
 # Импорт WebRTCAECSession
 try:
-    from webrtc_aec_wrapper import WebRTCAECSession
+    from aec.webrtc_aec_wrapper import WebRTCAECSession
     logging.info("WebRTCAECSession успешно импортирован")
 except Exception as e:
     logging.error(f"Ошибка при импорте WebRTCAECSession: {e}")
