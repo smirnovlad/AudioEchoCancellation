@@ -35,14 +35,6 @@ logging.basicConfig(
 # Добавляем корень проекта в путь Python для импорта модулей проекта
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-# Проверка доступности WebRTC
-try:
-    import aec.webrtc_audio_processing
-    logging.info("webrtc_audio_processing успешно импортирован")
-except ImportError:
-    logging.error("Не удалось импортировать webrtc_audio_processing. Установите пакет: pip install webrtc_audio_processing")
-    # Не выходим из программы, так как WebRTCAECSession может работать в режиме заглушки
-
 # Импорт WebRTCAECSession
 try:
     from aec.webrtc_aec_wrapper import WebRTCAECSession

@@ -1,5 +1,7 @@
 # AudioEchoCancellation
 
+Python version: 3.11
+
 ```sh
 # Установка необходимых зависимостей
 sudo apt-get install libtool autoconf automake build-essential pkg-config libglib2.0-dev
