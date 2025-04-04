@@ -128,16 +128,16 @@ class WebRTCAECSession:
                 
                 # Установка формата потока (частота дискретизации, количество каналов)
                 self.apm.set_stream_format(
-                    rate=self.sample_rate,
-                    channels=self.channels,
-                    out_rate=self.sample_rate,
-                    out_channels=self.channels
+                    self.sample_rate,
+                    self.channels,
+                    self.sample_rate,
+                    self.channels
                 )
                 
                 # Установка формата обратного потока (референсный сигнал)
                 self.apm.set_reverse_stream_format(
-                    rate=self.sample_rate,
-                    channels=self.channels
+                    self.sample_rate,
+                    self.channels
                 )
                 
                 # Проверяем доступные возможности APM
@@ -521,16 +521,16 @@ class WebRTCAECSession:
                 
                 # Установка формата потока
                 self.apm.set_stream_format(
-                    rate=self.sample_rate,
-                    channels=self.channels,
-                    out_rate=self.sample_rate,
-                    out_channels=self.channels
+                    self.sample_rate,
+                    self.channels,
+                    self.sample_rate,
+                    self.channels
                 )
                 
                 # Установка формата обратного потока
                 self.apm.set_reverse_stream_format(
-                    rate=self.sample_rate,
-                    channels=self.channels
+                    self.sample_rate,
+                    self.channels
                 )
                 
                 # Восстанавливаем задержку

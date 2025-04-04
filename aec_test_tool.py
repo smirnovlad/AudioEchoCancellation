@@ -45,7 +45,7 @@ except ImportError:
 
 # Импорт WebRTCAECSession
 try:
-    from runtime.l2_media.l21_audio_functions.f1_incoming.webrtc_aec_wrapper import WebRTCAECSession
+    from webrtc_aec_wrapper import WebRTCAECSession
     logging.info("WebRTCAECSession успешно импортирован")
 except Exception as e:
     logging.error(f"Ошибка при импорте WebRTCAECSession: {e}")
