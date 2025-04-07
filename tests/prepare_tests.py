@@ -50,15 +50,27 @@ def prepare_all_test_directories():
     
     Создает следующую структуру директорий:
     test_dir/
-    ├── clear_reference/
-    └── reference_by_micro/
+    ├── clear_reference/             # Для чистого референсного сигнала
+    │   ├── volume_01/            # 10% громкости
+    │   ├── volume_04/            # 40% громкости
+    │   └── ...
+    │
+    └── reference_by_micro/          # Для референса через микрофон
+        ├── delay_0/                 # Задержка 0 мс (без задержки)
+        │   ├── volume_01/        # 10% громкости
+        │   ├── volume_04/        # 40% громкости
+        │   └── ...
+        ├── delay_50/                # Задержка 50 мс
+        │   ├── volume_01/
+        │   └── ...
+        └── ...
     """
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Проверка наличия ffmpeg
     has_ffmpeg = check_ffmpeg()
     if not has_ffmpeg:
-        print("Предупреждение: ffmpeg не установлен. Для конвертации MP3 файлов требуется ffmpeg.")
+        print("Предупреждение: ffmpeg не установлен. Для конвертации MP3 в WAV требуется ffmpeg.")
         print("Установите ffmpeg или сконвертируйте файлы вручную.")
     
     # Список директорий с тестами
