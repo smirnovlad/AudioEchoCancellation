@@ -5,9 +5,19 @@
 
 Этот скрипт:
 1. Обрабатывает все поддиректории в тестовых каталогах (music, agent_speech)
-2. Применяет модуль AEC к парам файлов (reference_new.wav и original_input.wav)
-3. Сохраняет обработанные файлы и статистику в каждой поддиректории
-4. Генерирует сводный отчет для всех тестов
+2. Поддерживает структуру директорий:
+   - В каждом тестовом каталоге (music, agent_speech) находятся две поддиректории:
+     * clear_reference/ - для обработки чистого референсного сигнала
+     * reference_by_micro/ - для обработки сигнала через микрофон
+   - В каждой поддиректории находятся директории с разными уровнями громкости:
+     * reference_01/ - 10% громкости
+     * reference_04/ - 40% громкости
+     * reference_07/ - 70% громкости
+     * reference_10/ - 100% громкости (исходная)
+     * reference_13/ - 130% громкости
+3. Применяет модуль AEC к парам файлов (reference_new.wav и original_input.wav)
+4. Сохраняет обработанные файлы и статистику в каждой поддиректории
+5. Генерирует сводный отчет для всех тестов, группируя результаты по типам референсных сигналов
 """
 
 import os
@@ -81,18 +91,28 @@ def find_test_directories(base_dir="tests"):
             logging.warning(f"Директория {main_dir_path} не существует, пропускаем")
             continue
         
-        # Ищем поддиректории вида reference_XX
-        sub_dirs = []
-        for d in os.listdir(main_dir_path):
-            sub_dir_path = os.path.join(main_dir_path, d)
-            if os.path.isdir(sub_dir_path) and d.startswith("reference_"):
-                sub_dirs.append(sub_dir_path)
+        # Ищем поддиректории типа clear_reference и reference_by_micro
+        ref_types = ["clear_reference", "reference_by_micro"]
+        found_sub_dirs = []
         
-        if sub_dirs:
-            test_dirs[main_dir] = sub_dirs
-            logging.info(f"Найдено {len(sub_dirs)} поддиректорий в {main_dir}")
+        for ref_type in ref_types:
+            ref_type_path = os.path.join(main_dir_path, ref_type)
+            if not os.path.exists(ref_type_path):
+                logging.warning(f"Директория {ref_type_path} не существует, пропускаем")
+                continue
+                
+            # Ищем директории с разными уровнями громкости (reference_XX)
+            for d in os.listdir(ref_type_path):
+                sub_dir_path = os.path.join(ref_type_path, d)
+                if os.path.isdir(sub_dir_path) and d.startswith("reference_"):
+                    found_sub_dirs.append(sub_dir_path)
+                    logging.debug(f"Найдена директория: {sub_dir_path}")
+        
+        if found_sub_dirs:
+            test_dirs[main_dir] = found_sub_dirs
+            logging.info(f"Найдено {len(found_sub_dirs)} поддиректорий в {main_dir}")
         else:
-            logging.warning(f"В директории {main_dir_path} не найдено поддиректорий типа reference_XX")
+            logging.warning(f"В директории {main_dir_path} не найдено поддиректорий с уровнями громкости")
     
     return test_dirs
 
@@ -527,6 +547,8 @@ def process_all_tests(test_dirs, args):
         results[main_dir] = {}
         
         for sub_dir in sub_dirs:
+            if "music" in sub_dir:
+                continue
             dir_name = os.path.basename(sub_dir)
             
             # Определяем директорию для результатов
@@ -632,7 +654,8 @@ def generate_summary_report(results, output_dir=None):
 
 def generate_comparison_charts(results, output_dir):
     """
-    Генерирует сравнительные графики для различных уровней громкости
+    Генерирует сравнительные графики для различных уровней громкости,
+    группируя их по типам референсных сигналов (clear_reference и reference_by_micro)
     
     Args:
         results: Результаты тестов
@@ -651,36 +674,76 @@ def generate_comparison_charts(results, output_dir):
     ]
     
     for main_dir, sub_dirs in results.items():
-        # Получаем уровни громкости и соответствующие значения метрик
-        volume_levels = []
-        metrics_values = {metric: [] for metric in metrics_to_plot}
+        # Создаем словари для группировки результатов по типам референсов
+        ref_types = {
+            "clear_reference": {},
+            "reference_by_micro": {}
+        }
         
-        for dir_name, metrics in sorted(sub_dirs.items()):
-            # Извлекаем уровень громкости из имени директории (например, reference_04 -> 0.4)
-            if dir_name.startswith("reference_"):
-                volume_level = float(dir_name.split("_")[1]) / 10.0
-                volume_levels.append(volume_level)
-                
-                # Собираем значения метрик
-                for metric in metrics_to_plot:
-                    if metric in metrics and isinstance(metrics[metric], (int, float)):
-                        metrics_values[metric].append(metrics[metric])
-                    else:
-                        metrics_values[metric].append(None)
-        
-        # Создаем график для каждой метрики
-        for metric in metrics_to_plot:
-            if not any(v is not None for v in metrics_values[metric]):
+        # Группируем результаты по типам референсов
+        for dir_name, metrics in sub_dirs.items():
+            # Определяем тип референса из пути
+            path_parts = dir_name.split(os.sep)
+            
+            # Проверяем, содержит ли путь clear_reference или reference_by_micro
+            if "clear_reference" in path_parts:
+                ref_type = "clear_reference"
+            elif "reference_by_micro" in path_parts:
+                ref_type = "reference_by_micro"
+            else:
+                logging.warning(f"Неизвестный тип референса для {dir_name}, пропускаем")
                 continue
             
-            plt.figure(figsize=(10, 6))
-            plt.plot(volume_levels, metrics_values[metric], 'o-', linewidth=2)
-            plt.grid(True)
-            plt.xlabel('Уровень громкости (коэффициент)')
-            plt.ylabel(metric)
-            plt.title(f'{main_dir}: Зависимость {metric} от уровня громкости')
-            plt.savefig(os.path.join(charts_dir, f"{main_dir}_{metric}.png"))
-            plt.close()
+            # Получаем имя директории с уровнем громкости (reference_XX)
+            volume_dir = path_parts[-1]  # Последняя часть пути - имя директории с громкостью
+            
+            # Извлекаем уровень громкости из имени директории (например, reference_04 -> 0.4)
+            if volume_dir.startswith("reference_"):
+                volume_level = float(volume_dir.split("_")[1]) / 10.0
+                
+                # Добавляем метрики в соответствующую группу
+                if volume_level not in ref_types[ref_type]:
+                    ref_types[ref_type][volume_level] = {}
+                
+                for metric in metrics_to_plot:
+                    if metric in metrics and isinstance(metrics[metric], (int, float)):
+                        ref_types[ref_type][volume_level][metric] = metrics[metric]
+        
+        # Генерируем графики для каждого типа референса
+        for ref_type, volume_data in ref_types.items():
+            if not volume_data:  # Пропускаем, если нет данных
+                continue
+                
+            # Получаем упорядоченные уровни громкости и соответствующие значения метрик
+            volume_levels = sorted(volume_data.keys())
+            metrics_values = {metric: [] for metric in metrics_to_plot}
+            
+            for level in volume_levels:
+                for metric in metrics_to_plot:
+                    if level in volume_data and metric in volume_data[level]:
+                        metrics_values[metric].append(volume_data[level][metric])
+                    else:
+                        metrics_values[metric].append(None)
+            
+            # Создаем график для каждой метрики
+            for metric in metrics_to_plot:
+                if not any(v is not None for v in metrics_values[metric]):
+                    continue
+                
+                plt.figure(figsize=(10, 6))
+                plt.plot(volume_levels, metrics_values[metric], 'o-', linewidth=2)
+                plt.grid(True)
+                plt.xlabel('Уровень громкости (коэффициент)')
+                plt.ylabel(metric)
+                
+                # Используем понятные названия для типов референсов
+                ref_type_display = "Чистый референс" if ref_type == "clear_reference" else "Референс через микрофон"
+                plt.title(f'{main_dir}: {ref_type_display} - Зависимость {metric} от уровня громкости')
+                
+                # Создаем имя файла из типа референса и метрики
+                filename = f"{main_dir}_{ref_type}_{metric}.png"
+                plt.savefig(os.path.join(charts_dir, filename))
+                plt.close()
     
     logging.info(f"Графики сохранены в {charts_dir}")
 

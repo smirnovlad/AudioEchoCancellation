@@ -2,3 +2,5 @@
 reference_*/
 *.log
 *.pyc
+*.wav
+*.png

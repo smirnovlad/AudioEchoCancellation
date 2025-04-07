@@ -45,7 +45,14 @@ def check_ffmpeg():
         return False
 
 def prepare_all_test_directories():
-    """Подготавливает все директории с тестами."""
+    """
+    Подготавливает все директории с тестами.
+    
+    Создает следующую структуру директорий:
+    test_dir/
+    ├── clear_reference/
+    └── reference_by_micro/
+    """
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Проверка наличия ffmpeg
@@ -69,6 +76,12 @@ def prepare_all_test_directories():
             if not os.path.exists(reference_file):
                 print(f"Предупреждение: Файл {reference_file} не найден, пропускаем директорию")
                 continue
+                
+            # Проверяем наличие файла reference_by_micro.wav
+            reference_by_micro_file = os.path.join(test_dir, "reference_by_micro.wav")
+            if not os.path.exists(reference_by_micro_file):
+                print(f"Предупреждение: Файл {reference_by_micro_file} не найден, пропускаем директорию")
+                continue
             
             # Проверяем наличие файла my_voice (WAV или MP3)
             my_voice_wav = os.path.join(test_dir, "my_voice.wav")
@@ -81,6 +94,19 @@ def prepare_all_test_directories():
                 print("Рекомендуется установить ffmpeg или вручную конвертировать MP3 в WAV.")
             else:
                 print(f"Найден файл с голосом в {test_dir}")
+            
+            # Создаем необходимые поддиректории
+            clear_reference_dir = os.path.join(test_dir, "clear_reference")
+            reference_by_micro_dir = os.path.join(test_dir, "reference_by_micro")
+            
+            # Создаем базовые директории, если они не существуют
+            if not os.path.exists(clear_reference_dir):
+                os.makedirs(clear_reference_dir)
+                print(f"Создана директория {clear_reference_dir}")
+            
+            if not os.path.exists(reference_by_micro_dir):
+                os.makedirs(reference_by_micro_dir)
+                print(f"Создана директория {reference_by_micro_dir}")
             
             # Запускаем обработку директории через общий модуль
             try:
