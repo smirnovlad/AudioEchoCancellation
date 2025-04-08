@@ -83,7 +83,7 @@ def find_test_directories(base_dir="tests"):
     test_dirs = {}
     
     # Главные директории тестов
-    main_test_dirs = ["music", "agent_speech"]
+    main_test_dirs = ["music", "agent_speech", "agent_user_speech"]
     
     for main_dir in main_test_dirs:
         main_dir_path = os.path.join(base_dir, main_dir)
@@ -128,7 +128,7 @@ def find_test_directories(base_dir="tests"):
     
     return test_dirs
 
-def optimized_process_audio_with_aec(input_file, output_file, reference_file, sample_rate=16000, channels=1, 
+def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=16000, channels=1, 
                            visualize=True, output_dir="results", frame_size_ms=10.0):
     """
     Оптимизированная функция для обработки аудио с использованием WebRTC AEC.
@@ -308,14 +308,16 @@ def optimized_process_audio_with_aec(input_file, output_file, reference_file, sa
             
         logging.info(f"Обработанный файл сохранен как {output_file}")
         
-        # Метрики AEC (заглушка, в реальном коде здесь должны быть реальные метрики от WebRTC AEC)
+        # Расчёт метрик
         metrics = {
-            "frame_index": np.arange(int(in_frames_count / frame_size)),
-            "echo_return_loss": np.random.uniform(5, 15, int(in_frames_count / frame_size)),
-            "echo_return_loss_enhancement": np.random.uniform(10, 30, int(in_frames_count / frame_size)),
-            "echo_detected": np.random.randint(0, 2, int(in_frames_count / frame_size))
+            # "echo_frames": final_stats["echo_frames"],
+            # "echo_percentage": echo_percentage,
+            # "processed_frames": final_stats["processed_frames"],
+            # "delay_samples": delay_samples,
+            # "delay_ms": delay_ms,
+            # "confidence": confidence,
         }
-        
+
         # Визуализация результатов обработки
         if visualize:
             logging.info("Создание визуализаций...")
@@ -354,52 +356,30 @@ def optimized_process_audio_with_aec(input_file, output_file, reference_file, sa
                 if os.path.exists(my_voice_file):
                     with wave.open(my_voice_file, 'rb') as wf:
                         logging.info(f"my_voice.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
-                
-                # Исправляем передачу частоты дискретизации - используем фактическую частоту из файла
-                actual_sample_rate = in_rate  # Используем частоту из входного файла
-                logging.info(f"Используем фактическую частоту дискретизации для визуализации: {actual_sample_rate} Гц")
-                
-                # Добавляем логирование для отладки проблемы с растянутыми графиками
-                logging.info(f"Данные перед вызовом visualize_audio_processing:")
-                logging.info(f"Размер reference_data: {len(ref_data)} байт")
-                logging.info(f"Размер input_data: {len(in_data)} байт")
-                logging.info(f"Частота дискретизации: {sample_rate} Гц")
-
-                # Преобразуем для проверки
-                ref_array_check = np.frombuffer(ref_data, dtype=np.int16)
-                in_array_check = np.frombuffer(in_data, dtype=np.int16)
-                logging.info(f"Размер ref_array_check: {ref_array_check.shape}")
-                logging.info(f"Размер in_array_check: {in_array_check.shape}")
-                logging.info(f"Длительность ref: {len(ref_array_check)/sample_rate:.3f} сек")
-                logging.info(f"Длительность in: {len(in_array_check)/sample_rate:.3f} сек")
 
                 # Затем вызываем visualize_audio_processing
-                visualization_result = visualize_audio_processing(
+                visualize_audio_processing(
                     output_dir=output_dir,
                     reference_data=ref_data,
-                    input_data=in_data,
-                    processed_data=processed_data,
-                    reference_delayed_data=ref_delayed_data,
-                    sample_rate=sample_rate,
-                    max_delay_ms=1000,
                     reference_file_path=reference_file,
+                    input_data=in_data,
                     input_file_path=input_file,
+                    processed_data=processed_data,
+                    processed_file_path=output_file,
+                    reference_delayed_data=ref_delayed_data,
                     reference_delayed_file_path=reference_delayed_file,
+                    sample_rate=sample_rate,
                     channels=channels
                 )
                 
                 logging.info(f"Визуализации созданы в директории {output_dir}")
-                
-                # Добавляем результаты визуализации в метрики
-                if visualization_result:
-                    metrics.update(visualization_result)
-            
+
             except ImportError:
                 logging.warning("Не удалось импортировать модуль визуализации.")
             except Exception as e:
                 logging.error(f"Ошибка при создании визуализаций: {e}")
                 logging.exception("Подробная информация об ошибке:")
-        
+
         return metrics
         
     except Exception as e:
@@ -487,7 +467,7 @@ def process_test_directory(dir_path, output_dir=None, frame_size_ms=10.0, visual
             logging.info(f"Параметры аудио: {sample_rate}Hz, {channels} каналов")
         
         # Обрабатываем аудио с нашей оптимизированной функцией
-        metrics = optimized_process_audio_with_aec(
+        metrics = process_audio_with_aec(
             input_file,
             output_file,
             reference_file,
