@@ -617,24 +617,42 @@ class WebRTCAECSession:
             return False
 
     @staticmethod
-    def estimate_delay(reference_data: bytes, input_data: bytes, sample_rate: int = 16000, max_delay_ms: int = 1000) -> Tuple[int, float, float]:
+    def get_delay_correlation_data(reference_data: bytes, input_data: bytes, sample_rate: int = 16000, channels: int = 1, max_delay_ms: int = 1000) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Оценивает задержку между референсным и входным сигналами с помощью кросс-корреляции
+        Вычисляет данные корреляции между референсным и входным сигналами
         
         Args:
             reference_data: Референсный сигнал (байты)
             input_data: Входной сигнал (байты)
             sample_rate: Частота дискретизации (Гц)
+            channels: Количество каналов (1 для моно, 2 для стерео)
             max_delay_ms: Максимальная задержка для поиска (мс)
             
         Returns:
-            Tuple[int, float, float]: (задержка в сэмплах, задержка в мс, уверенность в оценке)
+            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: 
+                (ref_signal_norm, in_signal_norm, correlation, lags) - 
+                нормализованные сигналы, массив корреляции и массив задержек в отсчетах
         """
-        logging.info("Оценка задержки с помощью кросс-корреляции...")
+        logging.info(f"Вычисление корреляции для определения задержки (каналов: {channels})...")
         
         # Преобразуем байты в numpy массивы
         ref_signal = np.frombuffer(reference_data, dtype=np.int16)
         in_signal = np.frombuffer(input_data, dtype=np.int16)
+        
+        # Если у нас стерео-данные, преобразуем их в правильную форму и берем один канал
+        if channels == 2:
+            # Проверяем, что длина массивов четная для стерео данных
+            if len(ref_signal) % 2 == 0:
+                ref_signal = ref_signal.reshape(-1, 2)[:, 0]  # Берем только левый канал
+                logging.debug(f"Стерео референсный сигнал преобразован в моно: {len(ref_signal)} сэмплов")
+            else:
+                logging.warning(f"Нечетное количество элементов ({len(ref_signal)}) в стерео референсном сигнале, используем как есть")
+                
+            if len(in_signal) % 2 == 0:
+                in_signal = in_signal.reshape(-1, 2)[:, 0]  # Берем только левый канал
+                logging.debug(f"Стерео входной сигнал преобразован в моно: {len(in_signal)} сэмплов")
+            else:
+                logging.warning(f"Нечетное количество элементов ({len(in_signal)}) в стерео входном сигнале, используем как есть")
         
         # Ограничиваем длину сигналов для ускорения вычислений
         # Используем первые 5 секунд или меньше, если сигналы короче
@@ -643,20 +661,45 @@ class WebRTCAECSession:
         in_signal = in_signal[:max_samples]
         
         # Нормализуем сигналы для лучшей корреляции
-        ref_signal = ref_signal.astype(np.float32) / 32768.0
-        in_signal = in_signal.astype(np.float32) / 32768.0
+        ref_signal_norm = ref_signal.astype(np.float32) / 32768.0
+        in_signal_norm = in_signal.astype(np.float32) / 32768.0
+        
+        # Вычисляем кросс-корреляцию - ЕДИНСТВЕННЫЙ ВЫЗОВ np.correlate!
+        correlation = np.correlate(in_signal_norm, ref_signal_norm, mode='full')
+        
+        # Создаем массив задержек в отсчетах
+        lags = np.arange(len(correlation)) - (len(ref_signal_norm) - 1)
+        
+        return ref_signal_norm, in_signal_norm, correlation, lags
+
+    @staticmethod
+    def estimate_delay(reference_data: bytes, input_data: bytes, sample_rate: int = 16000, channels: int = 1, max_delay_ms: int = 1000) -> Tuple[int, float, float]:
+        """
+        Оценивает задержку между референсным и входным сигналами с помощью кросс-корреляции
+        
+        Args:
+            reference_data: Референсный сигнал (байты)
+            input_data: Входной сигнал (байты)
+            sample_rate: Частота дискретизации (Гц)
+            channels: Количество каналов (1 для моно, 2 для стерео)
+            max_delay_ms: Максимальная задержка для поиска (мс)
+            
+        Returns:
+            Tuple[int, float, float]: (задержка в сэмплах, задержка в мс, уверенность в оценке)
+        """
+        # Используем метод get_delay_correlation_data для получения корреляции
+        ref_signal_norm, in_signal_norm, correlation, lags = WebRTCAECSession.get_delay_correlation_data(
+            reference_data, input_data, sample_rate, channels, max_delay_ms
+        )
         
         # Вычисляем максимальную задержку в сэмплах
         max_delay_samples = int(max_delay_ms * sample_rate / 1000)
-        
-        # Вычисляем кросс-корреляцию
-        correlation = np.correlate(in_signal, ref_signal, mode='full')
         
         # Находим индекс максимальной корреляции
         max_index = np.argmax(correlation)
         
         # Вычисляем задержку (учитываем, что correlate возвращает сдвиг)
-        delay_samples = max_index - (len(ref_signal) - 1)
+        delay_samples = lags[max_index]
         
         # Ограничиваем задержку
         delay_samples = max(0, min(delay_samples, max_delay_samples))
@@ -666,7 +709,7 @@ class WebRTCAECSession:
         
         # Вычисляем уверенность в оценке (нормализованное значение максимума корреляции)
         max_correlation = correlation[max_index]
-        confidence = max_correlation / (np.std(ref_signal) * np.std(in_signal) * len(ref_signal))
+        confidence = max_correlation / (np.std(ref_signal_norm) * np.std(in_signal_norm) * len(ref_signal_norm))
         confidence = min(1.0, max(0.0, confidence))
         
         logging.info(f"Оценка задержки: {delay_samples} сэмплов ({delay_ms:.2f} мс), уверенность: {confidence:.2f}")
@@ -685,20 +728,57 @@ class WebRTCAECSession:
         Returns:
             Tuple[int, float, float]: (задержка в сэмплах, задержка в мс, уверенность в оценке)
         """
-        # Оцениваем задержку
-        delay_samples, delay_ms, confidence = self.estimate_delay(
-            reference_data, input_data, self.sample_rate, max_delay_ms
+        # Получаем данные корреляции напрямую, чтобы сохранить их для последующего использования
+        ref_signal_norm, in_signal_norm, correlation, lags = self.get_delay_correlation_data(
+            reference_data, input_data, self.sample_rate, self.channels, max_delay_ms
         )
         
-        # Устанавливаем задержку
-        success = self.set_system_delay(delay_samples)
+        # Вычисляем максимальную задержку в сэмплах
+        max_delay_samples = int(max_delay_ms * self.sample_rate / 1000)
         
-        if success:
-            logging.info(f"Автоматически установлена системная задержка: {delay_samples} сэмплов ({delay_ms:.2f} мс)")
-        else:
-            logging.warning("Не удалось автоматически установить системную задержку")
-
+        # Находим индекс максимальной корреляции
+        max_index = np.argmax(correlation)
+        
+        # Вычисляем задержку (учитываем, что correlate возвращает сдвиг)
+        delay_samples = lags[max_index]
+        
+        # Ограничиваем задержку
+        delay_samples = max(0, min(delay_samples, max_delay_samples))
+        
+        # Вычисляем задержку в мс
+        delay_ms = delay_samples * 1000 / self.sample_rate
+        
+        # Вычисляем уверенность в оценке (нормализованное значение максимума корреляции)
+        max_correlation = correlation[max_index]
+        confidence = max_correlation / (np.std(ref_signal_norm) * np.std(in_signal_norm) * len(ref_signal_norm))
+        confidence = min(1.0, max(0.0, confidence))
+        
+        logging.info(f"Оценка задержки: {delay_samples} сэмплов ({delay_ms:.2f} мс), уверенность: {confidence:.2f}")
+        
+        # Устанавливаем задержку в AEC
+        self.set_system_delay(delay_samples)
+        
+        # Сохраняем данные корреляции для последующего использования
+        self._last_correlation_data = {
+            'correlation': correlation,
+            'lags': lags,
+            'delay_samples': delay_samples,
+            'delay_ms': delay_ms,
+            'confidence': confidence
+        }
+        
         return delay_samples, delay_ms, confidence
+
+    def get_last_correlation_data(self) -> Dict[str, Any]:
+        """
+        Возвращает данные последнего расчета корреляции
+        
+        Returns:
+            Dict[str, Any]: Словарь с данными корреляции или пустой словарь, если корреляция еще не вычислялась
+        """
+        if hasattr(self, '_last_correlation_data'):
+            return self._last_correlation_data
+        return {}
 
     def optimize_for_best_quality(self):
         """

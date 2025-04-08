@@ -249,6 +249,12 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         delay_samples, delay_ms, confidence = aec_session.auto_set_delay(ref_data, in_data)
         logging.info(f"Обнаружена задержка: {delay_samples} семплов ({delay_ms:.2f} мс), уверенность: {confidence:.4f}")
         
+        # Получаем данные корреляции из последнего вычисления, если такой метод существует
+        correlation_data = {}
+        if hasattr(aec_session, 'get_last_correlation_data'):
+            correlation_data = aec_session.get_last_correlation_data()
+            logging.info(f"Получены данные корреляции из AEC-сессии для передачи в визуализацию")
+        
         # Оптимизация параметров AEC для лучшего качества
         aec_session.optimize_for_best_quality()
         
@@ -310,13 +316,21 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         
         # Расчёт метрик
         metrics = {
-            # "echo_frames": final_stats["echo_frames"],
-            # "echo_percentage": echo_percentage,
-            # "processed_frames": final_stats["processed_frames"],
-            # "delay_samples": delay_samples,
-            # "delay_ms": delay_ms,
-            # "confidence": confidence,
+            "echo_frames": final_stats.get("echo_frames", 0),
+            "echo_percentage": echo_percentage,
+            "processed_frames": final_stats.get("processed_frames", 0),
+            "delay_samples": delay_samples,
+            "delay_ms": delay_ms,
+            "confidence": confidence,
         }
+        
+        # Добавляем данные корреляции в метрики для визуализации
+        if correlation_data:
+            metrics.update({
+                "delay_correlation": correlation_data.get('correlation'),
+                "delay_lags": correlation_data.get('lags'),
+            })
+            logging.info(f"Данные корреляции добавлены в метрики для визуализации")
 
         # Визуализация результатов обработки
         if visualize:
@@ -369,7 +383,8 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                     reference_delayed_data=ref_delayed_data,
                     reference_delayed_file_path=reference_delayed_file,
                     sample_rate=sample_rate,
-                    channels=channels
+                    channels=channels,
+                    metrics=metrics  # передаем метрики с данными корреляции
                 )
                 
                 logging.info(f"Визуализации созданы в директории {output_dir}")

@@ -550,7 +550,8 @@ def visualize_audio_processing(
     reference_delayed_file_path: Optional[str] = None,
     output_prefix: str = "aec",
     sample_rate: int = 16000,
-    channels: int = 1
+    channels: int = 1,
+    metrics: Optional[Dict[str, Any]] = None
 ):
     """
     Единая функция для визуализации результатов обработки аудио
@@ -561,7 +562,7 @@ def visualize_audio_processing(
         input_data: Входные данные (байты)
         processed_data: Обработанные данные (байты)
         reference_delayed_data: Сдвинутые референсные данные (байты), обычно из reference_volumed_delayed.wav
-        metrics: Метрики обработки
+        metrics: Метрики обработки, включая данные корреляции
         sample_rate: Частота дискретизации
         output_prefix: Префикс для имен выходных файлов
         reference_file_path: Путь к референсному файлу (для анализа длительности)
@@ -656,7 +657,18 @@ def visualize_audio_processing(
             in_channel = in_array
 
         # Вычисляем задержку между сигналами
-        lag, delay_ms, correlation, lags, confidence = calculate_signal_delay(in_channel, ref_channel, sample_rate)
+        if metrics and all(k in metrics for k in ['delay_samples', 'delay_ms', 'confidence', 'delay_correlation', 'delay_lags']):
+            # Используем предрассчитанные данные из AEC
+            lag = metrics['delay_samples']
+            delay_ms = metrics['delay_ms']
+            confidence = metrics['confidence']
+            correlation = metrics['delay_correlation']
+            lags = metrics['delay_lags']
+            logging.info(f"Используются предрассчитанные данные корреляции из AEC, задержка: {delay_ms:.2f} мс")
+        else:
+            # Если данные не предоставлены, рассчитываем корреляцию
+            lag, delay_ms, correlation, lags, confidence = calculate_signal_delay(in_channel, ref_channel, sample_rate)
+            logging.info(f"Корреляция была рассчитана внутри функции визуализации")
         
         # Вычисляем длительность сигналов в миллисекундах
         ref_duration_ms = len(ref_array) * 1000 / sample_rate
@@ -679,7 +691,7 @@ def visualize_audio_processing(
         else:
             processed_channel = processed_array
 
-        # Находим минимальную длину массивов для корректнref_ref_channelchannel_displayого отображения
+        # Находим минимальную длину массивов для корректного отображения
         min_display_length = min(len(ref_channel), len(in_channel))
         logging.info(f"Минимальная длина массивов для отображения: {min_display_length} семплов")
 
