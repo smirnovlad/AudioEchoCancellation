@@ -4,3 +4,4 @@ reference_*/
 *.pyc
 *.wav
 *.png
+results_summary/

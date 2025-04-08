@@ -16,8 +16,8 @@
      * volume_10/ - 100% громкости (исходная)
      * volume_13/ - 130% громкости
 3. Применяет модуль AEC к парам файлов (reference_new.wav и original_input.wav)
-4. Сохраняет обработанные файлы и статистику в каждой поддиректории
-5. Генерирует сводный отчет для всех тестов, группируя результаты по типам референсных сигналов
+4. Сохраняет обработанные файлы и основные метрики (задержка, количество обработанных фреймов) в каждой поддиректории
+5. Для расчета дополнительных метрик (ERLE и др.) используйте скрипт metrics.py
 """
 
 import os
@@ -53,119 +53,16 @@ class NumpyJSONEncoder(json.JSONEncoder):
             return obj.tolist()
         return super(NumpyJSONEncoder, self).default(obj)
 
-def calculate_aec_metrics(ref_data, in_data, processed_data, ref_delayed_data=None, 
-                         sample_rate=16000, channels=1, predicted_delay_samples=None, 
-                         predicted_delay_ms=None):
-    """
-    Расчет метрик качества для AEC обработки.
-    
-    Args:
-        ref_data (bytes): Референсные данные
-        in_data (bytes): Входные данные
-        processed_data (bytes): Обработанные данные
-        ref_delayed_data (bytes, optional): Задержанные референсные данные
-        sample_rate (int): Частота дискретизации
-        channels (int): Количество каналов
-        predicted_delay_samples (int, optional): Предсказанная задержка в отсчетах
-        predicted_delay_ms (float, optional): Предсказанная задержка в миллисекундах
-    
-    Returns:
-        dict: Словарь с рассчитанными метриками
-    """
-    metrics = {}
-    
-    try:
-        # Преобразуем байтовые данные в numpy массивы
-        ref_np = np.frombuffer(ref_data, dtype=np.int16)
-        in_np = np.frombuffer(in_data, dtype=np.int16)
-        processed_np = np.frombuffer(processed_data, dtype=np.int16)
-        
-        # Обрезаем массивы до одинаковой длины
-        min_len = min(len(ref_np), len(in_np), len(processed_np))
-        ref_np = ref_np[:min_len]
-        in_np = in_np[:min_len]
-        processed_np = processed_np[:min_len]
-        
-        # Нормализуем данные
-        ref_norm = ref_np.astype(np.float32) / 32768.0
-        in_norm = in_np.astype(np.float32) / 32768.0
-        proc_norm = processed_np.astype(np.float32) / 32768.0
-        
-        # Расчет ERLE (Echo Return Loss Enhancement) в дБ
-        # ERLE = 10 * log10(power_of_input / power_of_processed)
-        input_power = np.mean(in_norm**2)
-        processed_power = np.mean(proc_norm**2)
-        
-        if processed_power > 0 and input_power > 0:
-            erle_db = 10 * np.log10(input_power / processed_power)
-            metrics["erle_db"] = float(erle_db)  # Явно преобразуем в float для совместимости
-            logging.info(f"Рассчитан ERLE: {erle_db:.2f} дБ")
-        else:
-            logging.warning("Не удалось рассчитать ERLE: нулевая мощность сигнала")
-        
-        # Расчет разницы между предсказанной и реальной задержкой
-        if ref_delayed_data is not None:
-            # Вычисляем "реальную" задержку между исходным референсным и задержанным референсным сигналами
-            ref_delayed_np = np.frombuffer(ref_delayed_data, dtype=np.int16)
-            
-            # Определяем минимальную длину для корреляции (до 5 секунд)
-            correlation_window = int(5 * sample_rate)  # 5 секунд для корреляции
-            actual_correlation_window = min(correlation_window, len(ref_np), len(ref_delayed_np))
-            
-            # Обрезаем оба сигнала до минимальной длины для корреляции
-            ref_for_corr = ref_np[:actual_correlation_window]
-            ref_delayed_for_corr = ref_delayed_np[:actual_correlation_window]
-            
-            # Если данные стерео, берем только левый канал
-            if channels == 2:
-                if len(ref_for_corr) % 2 == 0 and len(ref_delayed_for_corr) % 2 == 0:
-                    ref_for_corr = ref_for_corr.reshape(-1, 2)[:, 0]
-                    ref_delayed_for_corr = ref_delayed_for_corr.reshape(-1, 2)[:, 0]
-                    logging.info("Используется левый канал для анализа стерео данных")
-                else:
-                    logging.warning("Нечетное количество элементов для стерео данных, используются исходные массивы")
-            
-            # Нормализуем данные для корреляции
-            ref_for_corr = ref_for_corr.astype(np.float32) / 32768.0
-            ref_delayed_for_corr = ref_delayed_for_corr.astype(np.float32) / 32768.0
-            
-            # Вычисляем корреляцию
-            corr = np.correlate(ref_delayed_for_corr, ref_for_corr, 'full')
-            lags = np.arange(len(corr)) - (len(ref_for_corr) - 1)
-            
-            # Находим максимальную корреляцию
-            max_corr_idx = np.argmax(np.abs(corr))
-            real_delay_samples = lags[max_corr_idx]
-            real_delay_ms = real_delay_samples * 1000.0 / sample_rate
-            
-            # Добавляем метрики задержки
-            metrics.update({
-                "real_delay_samples": real_delay_samples,
-                "real_delay_ms": real_delay_ms,
-            })
-            
-            # Если есть предсказанная задержка, вычисляем разницу
-            if predicted_delay_samples is not None and predicted_delay_ms is not None:
-                delay_diff_samples = predicted_delay_samples - real_delay_samples
-                delay_diff_ms = predicted_delay_ms - real_delay_ms
-                delay_abs_diff_ms = abs(delay_diff_ms)
-                
-                metrics.update({
-                    "delay_diff_samples": delay_diff_samples,
-                    "delay_diff_ms": delay_diff_ms,
-                    "delay_abs_diff_ms": delay_abs_diff_ms,
-                })
-                
-                logging.info(f"Реальная задержка: {real_delay_samples} отсчетов ({real_delay_ms:.2f} мс)")
-                logging.info(f"Разница между предсказанной и реальной задержкой: {delay_diff_samples} отсчетов ({delay_diff_ms:.2f} мс)")
-    
-    except Exception as e:
-        logging.error(f"Ошибка при расчете метрик: {e}")
-    
-    return metrics
+# Примечание: функция calculate_aec_metrics перенесена в отдельный скрипт metrics.py
+# Для расчета дополнительных метрик (ERLE и др.) используйте скрипт metrics.py
 
 # Импорт из модуля AEC
 try:
+    # Добавляем родительскую директорию в путь импорта
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
     from aec import WebRTCAECSession
     logging.info("WebRTCAECSession успешно импортирован")
 except ImportError:
@@ -424,7 +321,7 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
             
         logging.info(f"Обработанный файл сохранен как {output_file}")
         
-        # Расчёт метрик
+        # Расчёт основных метрик
         metrics = {
             "echo_frames": final_stats.get("echo_frames", 0),
             "echo_percentage": echo_percentage,
@@ -434,44 +331,17 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
             "delay_confidence": confidence,
         }
         
-        # Добавляем данные корреляции в метрики для визуализации
-        if correlation_data:
-            metrics.update({
-                "delay_correlation": correlation_data.get('correlation'),
-                "delay_lags": correlation_data.get('lags'),
-            })
-            logging.info(f"Данные корреляции добавлены в метрики для визуализации")
+        # # Добавляем данные корреляции в метрики для визуализации
+        # if correlation_data:
+        #     metrics.update({
+        #         "delay_correlation": correlation_data.get('correlation'),
+        #         "delay_lags": correlation_data.get('lags'),
+        #     })
+        #     logging.info(f"Данные корреляции добавлены в метрики для визуализации")
         
-        # Дополнительный расчёт метрик качества AEC
-        try:
-            # Расчёт дополнительных метрик
-            aec_metrics = calculate_aec_metrics(
-                ref_data, 
-                in_data, 
-                processed_data, 
-                ref_delayed_data,
-                sample_rate=sample_rate,
-                channels=channels,
-                predicted_delay_samples=metrics.get('delay_samples'),
-                predicted_delay_ms=metrics.get('delay_ms')
-            )
-            
-            # Добавляем рассчитанные метрики в общий словарь метрик
-            metrics.update(aec_metrics)
-            
-            # Особая обработка для ERLE, чтобы гарантировать его числовой формат
-            if 'erle_db' in metrics:
-                try:
-                    metrics['erle_db'] = float(metrics['erle_db'])
-                    logging.info(f"ERLE в метриках: {metrics['erle_db']} (тип: {type(metrics['erle_db'])})")
-                except (ValueError, TypeError):
-                    logging.error(f"Не удалось преобразовать ERLE в числовой формат: {metrics['erle_db']}")
-            else:
-                logging.warning("ERLE отсутствует в рассчитанных метриках")
-            
-        except Exception as e:
-            logging.error(f"Ошибка при расчете дополнительных метрик: {e}")
-            logging.exception("Подробная информация об ошибке:")
+        # Примечание: Дополнительный расчёт метрик качества (ERLE и другие)
+        # теперь выполняется отдельным скриптом metrics.py
+        logging.info("Для расчета дополнительных метрик (ERLE и др.) используйте скрипт metrics.py")
 
         # Визуализация результатов обработки
         if visualize:
@@ -561,8 +431,8 @@ def process_test_directory(dir_path, output_dir=None, frame_size_ms=10.0, visual
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.getLogger().setLevel(log_level)
     
-    if output_dir is None:
-        output_dir = dir_path
+    # Всегда сохраняем метрики в той же директории, где находятся аудиофайлы
+    output_dir = dir_path
     
     # Настраиваем файловый логгер для конкретной директории
     dir_log_file = os.path.join(output_dir, "aec_processing.log")
@@ -695,14 +565,8 @@ def process_all_tests(test_dirs, args):
     for main_dir, sub_dirs in test_dirs.items():
         # Обрабатываем поддиректории
         for sub_dir in sub_dirs:
-            # Определяем директорию для вывода результатов
-            if args.results_dir:
-                # Создаем аналогичную структуру директорий в results_dir
-                rel_path = os.path.relpath(sub_dir, os.path.dirname(main_dir))
-                output_dir = os.path.join(args.results_dir, rel_path)
-                os.makedirs(output_dir, exist_ok=True)
-            else:
-                output_dir = sub_dir
+            # Всегда сохраняем результаты в исходной директории тестов
+            output_dir = sub_dir
             
             # Обрабатываем директорию
             metrics = process_test_directory(
@@ -717,48 +581,18 @@ def process_all_tests(test_dirs, args):
                 # Сохраняем результаты
                 results[sub_dir] = metrics
     
-    # Определяем директорию для сохранения отчета
-    if args.results_dir:
-        report_dir = args.results_dir
-    else:
-        # Если директория results_dir не указана, создаем отдельную директорию для сводного отчета
-        report_dir = "results_summary"
-        os.makedirs(report_dir, exist_ok=True)
+    # # Сохраняем сводный JSON файл с результатами в корневой директории тестов
+    # results_file = os.path.join(args.tests_dir, "aec_test_results.json")
     
-    # Генерируем отчёт с помощью новой функции
-    generate_report(results, report_dir)
+    # try:
+    #     with open(results_file, 'w') as f:
+    #         json.dump(results, f, indent=2, cls=NumpyJSONEncoder)
+    #     logging.info(f"Сводные результаты тестов сохранены в {results_file}")
+    # except Exception as e:
+    #     logging.error(f"Ошибка при сохранении сводных результатов: {e}")
     
+    logging.info("Обработка всех тестовых директорий завершена")
     return results
-
-def get_report_dirname(test_dir):
-    """
-    Создает имя директории для отчетов на основе пути к тестовой директории.
-    
-    Args:
-        test_dir: Полный путь к тестовой директории
-        
-    Returns:
-        str: Имя директории для отчетов
-    """
-    # Находим базовую директорию тестов
-    base_parts = []
-    path_parts = os.path.normpath(test_dir).split(os.sep)
-    
-    # Ищем компоненты, начиная с 'tests'
-    tests_found = False
-    for part in path_parts:
-        if tests_found or part == 'tests':
-            tests_found = True
-            base_parts.append(part)
-    
-    # Если не нашли 'tests' в пути, используем последние компоненты пути
-    if not tests_found:
-        base_parts = path_parts[-min(3, len(path_parts)):]
-    
-    # Собираем имя директории
-    report_dirname = '_'.join(base_parts)
-    
-    return report_dirname
 
 def process_test_directories(args):
     """
@@ -772,29 +606,18 @@ def process_test_directories(args):
         if os.path.exists(args.test_dir):
             logging.info(f"Обработка указанной директории: {args.test_dir}")
             
-            # Получаем имя директории для отчетов
-            report_dirname = get_report_dirname(args.test_dir)
+            # Обрабатываем директории и сохраняем результаты прямо в них
+            results = process_directory_by_level(args.test_dir, args)
             
-            # Создаем директорию для отчетов
-            report_dir = os.path.join("results_summary", report_dirname)
-            os.makedirs(report_dir, exist_ok=True)
-            logging.info(f"Директория для отчетов: {report_dir}")
+            # Сохраняем сводные результаты в JSON файл в указанной директории
+            results_file = os.path.join(args.test_dir, "aec_test_results.json")
+            try:
+                with open(results_file, 'w') as f:
+                    json.dump(results, f, indent=2, cls=NumpyJSONEncoder)
+                logging.info(f"Сводные результаты тестов сохранены в {results_file}")
+            except Exception as e:
+                logging.error(f"Ошибка при сохранении сводных результатов: {e}")
             
-            # Если явно указана директория для результатов, используем её
-            if args.results_dir:
-                results = process_directory_by_level(args.test_dir, args)
-                # Генерируем отчет в указанной директории
-                generate_report(results, args.results_dir)
-            else:
-                # Иначе используем автоматически созданную директорию
-                # Сохраняем исходное значение
-                original_results_dir = args.results_dir
-                args.results_dir = report_dir
-                results = process_directory_by_level(args.test_dir, args)
-                # Генерируем отчет
-                generate_report(results, report_dir)
-                # Восстанавливаем исходное значение
-                args.results_dir = original_results_dir
         else:
             logging.error(f"Указанная директория не существует: {args.test_dir}")
             sys.exit(1)
@@ -802,26 +625,17 @@ def process_test_directories(args):
         # Иначе обрабатываем все директории
         logging.info(f"Поиск тестовых директорий в {args.tests_dir}")
         
-        # Создаем директорию для отчетов
-        report_dir = os.path.join("results_summary", "tests")
-        os.makedirs(report_dir, exist_ok=True)
-        logging.info(f"Директория для отчетов: {report_dir}")
+        # Обрабатываем директории и сохраняем результаты прямо в них
+        results = process_all_tests(find_test_directories(args.tests_dir), args)
         
-        # Если явно указана директория для результатов, используем её
-        if args.results_dir:
-            results = process_all_tests(find_test_directories(args.tests_dir), args)
-            # Генерируем отчет в указанной директории
-            generate_report(results, args.results_dir)
-        else:
-            # Иначе используем автоматически созданную директорию
-            # Сохраняем исходное значение
-            original_results_dir = args.results_dir
-            args.results_dir = report_dir
-            results = process_all_tests(find_test_directories(args.tests_dir), args)
-            # Генерируем отчет
-            generate_report(results, report_dir)
-            # Восстанавливаем исходное значение
-            args.results_dir = original_results_dir
+        # Сохраняем результаты в корневой директории тестов
+        results_file = os.path.join(args.tests_dir, "aec_test_results.json")
+        try:
+            with open(results_file, 'w') as f:
+                json.dump(results, f, indent=2, cls=NumpyJSONEncoder)
+            logging.info(f"Сводные результаты тестов сохранены в {results_file}")
+        except Exception as e:
+            logging.error(f"Ошибка при сохранении сводных результатов: {e}")
 
 def process_single_directory(test_dir, args):
     """
@@ -881,7 +695,9 @@ def process_directory_by_level(dir_path, args):
     # Проверяем, является ли текущая директория директорией с уровнем громкости (volume_XX)
     if dir_name.startswith("volume_"):
         logging.info(f"Обнаружена директория с уровнем громкости: {dir_path}")
-        metrics = process_test_directory(dir_path, args.results_dir if args.results_dir else dir_path, 
+        # Всегда сохраняем результаты в той же директории, где находятся файлы
+        output_dir = dir_path
+        metrics = process_test_directory(dir_path, output_dir, 
                                         args.frame_size_ms, args.visualize, args.verbose)
         if metrics:
             results[dir_path] = metrics
@@ -894,12 +710,8 @@ def process_directory_by_level(dir_path, args):
             item_path = os.path.join(dir_path, item)
             if os.path.isdir(item_path) and item.startswith("volume_"):
                 logging.info(f"Обрабатываем поддиректорию с уровнем громкости: {item_path}")
+                # Всегда сохраняем результаты в исходной директории
                 output_dir = item_path
-                if args.results_dir:
-                    # Создаем структуру директорий в results_dir
-                    rel_path = os.path.relpath(item_path, os.path.dirname(os.path.dirname(dir_path)))
-                    output_dir = os.path.join(args.results_dir, rel_path)
-                    os.makedirs(output_dir, exist_ok=True)
                 
                 metrics = process_test_directory(item_path, output_dir, 
                                                args.frame_size_ms, args.visualize, args.verbose)
@@ -915,12 +727,8 @@ def process_directory_by_level(dir_path, args):
                 item_path = os.path.join(dir_path, item)
                 if os.path.isdir(item_path) and item.startswith("volume_"):
                     logging.info(f"Обрабатываем поддиректорию с уровнем громкости: {item_path}")
+                    # Всегда сохраняем результаты в исходной директории
                     output_dir = item_path
-                    if args.results_dir:
-                        # Создаем структуру директорий в results_dir
-                        rel_path = os.path.relpath(item_path, os.path.dirname(dir_path))
-                        output_dir = os.path.join(args.results_dir, rel_path)
-                        os.makedirs(output_dir, exist_ok=True)
                     
                     metrics = process_test_directory(item_path, output_dir, 
                                                    args.frame_size_ms, args.visualize, args.verbose)
@@ -961,10 +769,8 @@ def process_directory_by_level(dir_path, args):
         
         if os.path.exists(reference_file) and os.path.exists(input_file):
             logging.info(f"Найдены необходимые файлы в директории {dir_path}, обрабатываем")
+            # Всегда сохраняем результаты в исходной директории
             output_dir = dir_path
-            if args.results_dir:
-                os.makedirs(args.results_dir, exist_ok=True)
-                output_dir = args.results_dir
             
             metrics = process_test_directory(dir_path, output_dir, 
                                            args.frame_size_ms, args.visualize, args.verbose)
@@ -981,93 +787,16 @@ def process_directory_by_level(dir_path, args):
                     in_file = os.path.join(item_path, "original_input.wav")
                     if os.path.exists(ref_file) and os.path.exists(in_file):
                         logging.info(f"Найдены необходимые файлы в поддиректории {item_path}, обрабатываем")
+                        # Всегда сохраняем результаты в исходной директории
                         output_dir = item_path
-                        if args.results_dir:
-                            # Создаем структуру директорий в results_dir
-                            rel_path = os.path.relpath(item_path, os.path.dirname(dir_path))
-                            output_dir = os.path.join(args.results_dir, rel_path)
-                            os.makedirs(output_dir, exist_ok=True)
                         
                         metrics = process_test_directory(item_path, output_dir, 
                                                        args.frame_size_ms, args.visualize, args.verbose)
                         if metrics:
                             results[item_path] = metrics
     
-    # Теперь вместо генерации отчета здесь, мы просто возвращаем результаты
-    # для централизованной генерации отчета
     return results
-
-def generate_report(results, report_dir):
-    """
-    Генерирует отчёт на основе результатов тестов.
     
-    Args:
-        results: Словарь с результатами тестов
-        report_dir: Директория для сохранения отчёта
-    """
-    if not results:
-        logging.warning("Нет результатов для генерации отчёта")
-        return
-    
-    # Очищаем директорию для отчёта, если она существует
-    if os.path.exists(report_dir):
-        logging.info(f"Очистка существующей директории отчёта: {report_dir}")
-        try:
-            # Удаляем все файлы в директории
-            for item in os.listdir(report_dir):
-                item_path = os.path.join(report_dir, item)
-                if os.path.isfile(item_path):
-                    os.unlink(item_path)
-                elif os.path.isdir(item_path):
-                    # Для поддиректории charts нужно удалить её содержимое
-                    if item == "charts":
-                        for chart_file in os.listdir(item_path):
-                            chart_file_path = os.path.join(item_path, chart_file)
-                            if os.path.isfile(chart_file_path):
-                                os.unlink(chart_file_path)
-                    else:
-                        # Для других поддиректорий удаляем рекурсивно всю директорию
-                        import shutil
-                        shutil.rmtree(item_path)
-        except Exception as e:
-            logging.error(f"Ошибка при очистке директории {report_dir}: {e}")
-            logging.exception("Подробная информация об ошибке:")
-    
-    # Создаём директорию для отчёта, если её нет
-    os.makedirs(report_dir, exist_ok=True)
-    
-    # Сохраняем результаты тестов в JSON файл
-    results_file = os.path.join(report_dir, "aec_test_results.json")
-    with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2, cls=NumpyJSONEncoder)
-    
-    logging.info(f"Результаты тестов сохранены в {results_file}")
-    
-    # Запускаем скрипт report.py для генерации отчетов
-    try:
-        import report
-        
-        logging.info("Запуск скрипта report.py для генерации отчетов...")
-        
-        # Группируем результаты по параметрам 
-        grouped_results = report.group_results_by_params(results)
-        
-        # Генерируем сводный отчет
-        summary_report = report.generate_summary_report(grouped_results)
-        
-        # Сохраняем отчет
-        report.save_report(summary_report, report_dir)
-        
-        # Генерируем графики
-        report.generate_comparison_charts(grouped_results, report_dir)
-        
-        logging.info("Отчет успешно сгенерирован с помощью report.py")
-    except ImportError:
-        logging.error("Не удалось импортировать модуль report.py")
-    except Exception as e:
-        logging.error(f"Ошибка при использовании модуля report.py: {e}")
-        logging.exception("Подробная информация об ошибке:")
-
 def main():
     parser = argparse.ArgumentParser(description="Пакетная обработка тестовых данных с WebRTC AEC")
     parser.add_argument("--tests-dir", "-t", default="tests", 
@@ -1077,7 +806,7 @@ def main():
                            "Может быть любого уровня вложенности: agent_user_speech, reference_by_micro, "
                            "delay_XX или volume_XX. Скрипт автоматически определит уровень и обработает соответствующие данные.")
     parser.add_argument("--results-dir", "-r", default=None, 
-                      help="Директория для сохранения результатов (по умолчанию: исходные директории)")
+                      help="Директория для сохранения результатов (не используется, результаты сохраняются в исходных директориях)")
     parser.add_argument("--visualize", "-v", action="store_true", default=True,
                       help="Создавать визуализации (по умолчанию: включено)")
     parser.add_argument("--no-visualize", action="store_false", dest="visualize",
@@ -1094,11 +823,16 @@ def main():
     logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
     
     logging.info("Запуск пакетной обработки тестовых данных с WebRTC AEC")
+    logging.info("Примечание: Результаты будут сохранены в исходных директориях с тестами")
+    logging.info("Для расчета дополнительных метрик, используйте скрипт metrics.py")
+    logging.info("Для создания отчетов и графиков, используйте скрипт report.py")
     
     # Обрабатываем директории в соответствии с аргументами
     process_test_directories(args)
     
     logging.info("Обработка завершена")
+    logging.info("Базовые метрики сохранены в файлах aec_metrics.json в соответствующих директориях")
+    logging.info("Далее можно запустить: python metrics.py --test-dir <директория_с_тестами>")
 
 if __name__ == "__main__":
     main() 

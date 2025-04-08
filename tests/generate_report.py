@@ -3,13 +3,16 @@
 Скрипт для анализа результатов тестов AEC и генерации отчетов
 
 Этот скрипт:
-1. Загружает результаты тестов, созданные batch_aec_test.py
+1. Загружает результаты тестов из summary_results.json, созданного metrics.py
 2. Анализирует зависимости показателей от различных параметров:
    - Уровень громкости
    - Задержка
    - Тип референсного сигнала
 3. Генерирует различные графики и статистические отчеты
 4. Сохраняет результаты анализа в структурированном виде
+
+Использование:
+python report.py --test-dir tests/agent_user_speech/reference_by_micro/delay_200
 """
 
 import os
@@ -46,46 +49,33 @@ class NumpyJSONEncoder(json.JSONEncoder):
         return super(NumpyJSONEncoder, self).default(obj)
 
 
-def load_test_results(directory: str) -> Dict[str, Any]:
+def load_test_results(test_dir: str) -> Dict[str, Any]:
     """
-    Загружает результаты тестов из указанной директории
+    Загружает результаты тестов из файла summary_results.json в указанной директории
     
     Args:
-        directory: Директория с результатами тестов
+        test_dir: Директория с файлом summary_results.json
         
     Returns:
         dict: Словарь с результатами тестов
     """
-    results = {}
+    # Путь к файлу summary_results.json
+    summary_file = os.path.join(test_dir, "summary_results.json")
     
-    # Проверяем, является ли directory файлом JSON
-    if os.path.isfile(directory) and directory.endswith('.json'):
-        try:
-            with open(directory, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logging.error(f"Ошибка при загрузке файла {directory}: {e}")
-            return {}
+    # Проверяем существование файла
+    if not os.path.exists(summary_file):
+        logging.error(f"Файл {summary_file} не найден")
+        return {}
     
-    # Иначе, обходим всю директорию рекурсивно
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file == "aec_metrics.json":
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r') as f:
-                        metrics = json.load(f)
-                        results[root] = metrics
-                        logging.debug(f"Загружены метрики из {file_path}")
-                except Exception as e:
-                    logging.error(f"Ошибка при загрузке файла {file_path}: {e}")
-    
-    if not results:
-        logging.warning(f"В директории {directory} не найдены файлы с метриками (aec_metrics.json)")
-    else:
-        logging.info(f"Загружено {len(results)} наборов метрик")
-    
-    return results
+    # Загружаем результаты из файла
+    try:
+        with open(summary_file, 'r') as f:
+            results = json.load(f)
+            logging.info(f"Загружены результаты из {summary_file}: {len(results)} тестов")
+            return results
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке файла {summary_file}: {e}")
+        return {}
 
 
 def extract_test_parameters(path: str) -> Tuple[Optional[str], Optional[int], Optional[float]]:
@@ -737,10 +727,10 @@ def save_report(report: Dict[str, Any], output_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Анализ результатов тестов AEC и генерация отчетов")
-    parser.add_argument("--results-dir", "-r", required=True, 
-                      help="Директория с результатами тестов (содержащая файлы aec_metrics.json)")
-    parser.add_argument("--output-dir", "-o", default="report_output", 
-                      help="Директория для сохранения отчета (по умолчанию: report_output)")
+    parser.add_argument("--test-dir", "-d", required=True, 
+                      help="Директория с файлом summary_results.json")
+    parser.add_argument("--output-dir", "-o", default=None, 
+                      help="Директория для сохранения отчета (по умолчанию: {test_dir}/report_output)")
     parser.add_argument("--verbose", "-v", action="store_true", default=False,
                       help="Подробный вывод")
     
@@ -751,8 +741,20 @@ def main():
     
     logging.info("Запуск анализа результатов тестов AEC")
     
-    # Загружаем результаты тестов
-    results = load_test_results(args.results_dir)
+    # Проверяем наличие указанной директории
+    if not os.path.exists(args.test_dir):
+        logging.error(f"Указанная директория не существует: {args.test_dir}")
+        sys.exit(1)
+    
+    # Определяем директорию для сохранения отчета
+    if args.output_dir is None:
+        # По умолчанию создаем директорию report_output внутри test_dir
+        output_dir = os.path.join(args.test_dir, "report_output")
+    else:
+        output_dir = args.output_dir
+    
+    # Загружаем результаты тестов из summary_results.json
+    results = load_test_results(args.test_dir)
     
     if not results:
         logging.error("Не найдены результаты тестов. Завершение.")
@@ -765,12 +767,12 @@ def main():
     report = generate_summary_report(grouped_results)
     
     # Сохраняем отчет
-    save_report(report, args.output_dir)
+    save_report(report, output_dir)
     
     # Генерируем графики
-    generate_comparison_charts(grouped_results, args.output_dir)
+    generate_comparison_charts(grouped_results, output_dir)
     
-    logging.info("Анализ завершен. Отчет сгенерирован.")
+    logging.info(f"Анализ завершен. Отчет сгенерирован в {output_dir}")
 
 
 if __name__ == "__main__":

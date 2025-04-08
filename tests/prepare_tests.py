@@ -10,6 +10,7 @@ import os
 import sys
 import subprocess
 import importlib.util
+import shutil
 
 # Импортируем общий модуль для создания вариантов с разной громкостью
 try:
@@ -44,6 +45,28 @@ def check_ffmpeg():
         print("FFmpeg не найден. Конвертация MP3 в WAV будет недоступна.")
         return False
 
+def clean_test_directories(test_dir):
+    """
+    Очищает директории с тестами, созданные в предыдущих запусках.
+    
+    Удаляет следующие директории и их содержимое:
+    - clear_reference/
+    - reference_by_micro/
+    """
+    directories_to_clean = [
+        os.path.join(test_dir, "clear_reference"),
+        os.path.join(test_dir, "reference_by_micro")
+    ]
+    
+    for directory in directories_to_clean:
+        if os.path.exists(directory) and os.path.isdir(directory):
+            print(f"Очистка директории: {directory}")
+            try:
+                shutil.rmtree(directory)
+                print(f"Директория {directory} успешно удалена")
+            except Exception as e:
+                print(f"Ошибка при удалении директории {directory}: {e}")
+
 def prepare_all_test_directories():
     """
     Подготавливает все директории с тестами.
@@ -76,7 +99,8 @@ def prepare_all_test_directories():
     # Список директорий с тестами
     test_dirs = [
         os.path.join(base_dir, "music"),
-        os.path.join(base_dir, "agent_speech")
+        os.path.join(base_dir, "agent_speech"),
+        os.path.join(base_dir, "agent_user_speech"),
     ]
     
     for test_dir in test_dirs:
@@ -106,6 +130,9 @@ def prepare_all_test_directories():
                 print("Рекомендуется установить ffmpeg или вручную конвертировать MP3 в WAV.")
             else:
                 print(f"Найден файл с голосом в {test_dir}")
+            
+            # Очищаем существующие директории перед созданием новых
+            clean_test_directories(test_dir)
             
             # Создаем необходимые поддиректории
             clear_reference_dir = os.path.join(test_dir, "clear_reference")
