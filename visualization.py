@@ -5,43 +5,7 @@ import matplotlib.pyplot as plt
 from scipy import signal
 import wave
 from typing import Optional, Tuple, Dict, List, Any
-
-def get_wav_info(file_path: str) -> Dict[str, Any]:
-    """
-    Получает информацию о WAV файле.
-    
-    Args:
-        file_path: Путь к WAV файлу
-        
-    Returns:
-        dict: Словарь с информацией о файле
-    """
-    try:
-        with wave.open(file_path, 'rb') as wf:
-            n_channels = wf.getnchannels()
-            sample_width = wf.getsampwidth()
-            framerate = wf.getframerate()
-            n_frames = wf.getnframes()
-            
-            # Вычисляем длительность в миллисекундах
-            duration_ms = n_frames * 1000 / framerate
-            
-            return {
-                'n_channels': n_channels,
-                'sample_width': sample_width,
-                'framerate': framerate,
-                'n_frames': n_frames,
-                'duration_ms': duration_ms
-            }
-    except Exception as e:
-        logging.error(f"Ошибка при получении информации о WAV файле {file_path}: {e}")
-        return {
-            'n_channels': 1,
-            'sample_width': 2,
-            'framerate': 16000,
-            'n_frames': 0,
-            'duration_ms': 0
-        }
+from utils import log_file_info
 
 def plot_reference_signals(
     plt_figure,
@@ -64,8 +28,18 @@ def plot_reference_signals(
     """
     plt_figure.subplot(*subplot_position)
     
-    # Определяем длину для отображения до 8000 мс
-    display_samples = int(8000 * sample_rate / 1000)  # Количество семплов для 8000 мс
+    # Определяем максимальную длительность для отображения (в мс)
+    # Используем длину обработанного файла, но не менее 8000 мс и не более 40000 мс
+    max_display_ms = max(8000, min(40000, max(len(ref_channel), len(ref_by_micro_volumed_delayed_channel)) * 1000 / sample_rate))
+    display_samples = int(max_display_ms * sample_rate / 1000)
+    
+    # Определяем шаг деления оси X в зависимости от длительности
+    if max_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для длительности до 10 секунд
+    elif max_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для длительности от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
     
     # Дополняем оба массива нулями до display_samples
     padded_ref = np.zeros(display_samples)
@@ -78,7 +52,7 @@ def plot_reference_signals(
     ref_channel = padded_ref
     ref_by_micro_volumed_delayed_channel = padded_ref_delayed
     
-    logging.info(f"Референсные сигналы дополнены нулями до 8000 мс ({display_samples} семплов)")
+    logging.info(f"Референсные сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
     logging.info(f"Исходная длина ref_channel: {len(ref_channel)} семплов")
     logging.info(f"Исходная длина ref_by_micro_volumed_delayed_channel: {len(ref_by_micro_volumed_delayed_channel)} семплов")
     
@@ -96,9 +70,9 @@ def plot_reference_signals(
     
     plt_figure.title(f'{subplot_position[-1]}. Сравнение референсных сигналов на входе в микро (с задержкой и без)')
     
-    # Добавляем более детальные деления на оси X
-    plt_figure.xticks(np.arange(0, 8001, 250))  # Деления каждые 250 мс до 8000 мс
-    plt_figure.xlim([0, 8000])  # Фиксированный диапазон до 8000 мс
+    # Добавляем более детальные деления на оси X с динамическим шагом
+    plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
+    plt_figure.xlim([0, max_display_ms])  # Динамический диапазон
     plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
     
     plt_figure.xlabel('Время (мс)')
@@ -144,10 +118,23 @@ def plot_reference_correlation(
     corr_time = np.arange(len(corr)) - (len(ref_for_corr) - 1)
     corr_time_ms = corr_time * 1000.0 / sample_rate
 
-    # Находим максимальное значение корреляции и соответствующую задержку
-    max_corr_idx = np.argmax(corr)
-    ref_delay_samples = corr_time[max_corr_idx]
-    ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
+    # Находим индекс середины корреляции (нулевая задержка)
+    center_idx = len(ref_for_corr) - 1
+    
+    # Анализируем только положительные задержки (> 0 мс)
+    positive_indices = np.where(corr_time > 0)[0]
+    
+    if len(positive_indices) > 0:
+        # Находим максимальное значение корреляции только на положительных задержках
+        max_corr_idx = positive_indices[np.argmax(np.abs(corr[positive_indices]))]
+        ref_delay_samples = corr_time[max_corr_idx]
+        ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
+    else:
+        # Если по какой-то причине нет положительных значений
+        max_corr_idx = np.argmax(np.abs(corr))
+        ref_delay_samples = corr_time[max_corr_idx]
+        ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
+        logging.warning("Не найдено положительных значений задержки, используется максимальная корреляция")
 
     # Логируем информацию о найденной задержке
     logging.info(f"Корреляция между референсными сигналами на входе в микро (с задержкой и без): макс.индекс={max_corr_idx}, задержка={ref_delay_samples} сэмплов ({ref_delay_ms:.2f} мс)")
@@ -162,11 +149,27 @@ def plot_reference_correlation(
     plt_figure.ylabel('Корреляция')
     plt_figure.legend()
 
-    # Устанавливаем диапазон по X
-    plt_figure.xlim([-100, 1500])  # Изменен диапазон от -100 до 1500 мс
-    plt_figure.xticks(np.arange(-100, 1501, 250))  # Деления каждые 250 мс
+    # Определяем максимальный диапазон для отображения корреляции и шаг
+    max_corr_display_ms = max(1500, min(ref_delay_ms * 2, 5000))
+    
+    # Определяем шаг деления оси X в зависимости от диапазона
+    if max_corr_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для диапазона до 10 секунд
+    elif max_corr_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для диапазона от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для диапазона более 20 секунд
+    
+    # Устанавливаем диапазон по X с учетом найденной задержки
+    # Отображаем как отрицательную часть (для контекста), так и положительную (где ищем задержку)
+    plt_figure.xlim([-100, max_corr_display_ms])
+    plt_figure.xticks(np.arange(-100, max_corr_display_ms + 1, tick_step_ms))
     # Добавляем сетку
     plt_figure.grid(True, which='both', linestyle='--', alpha=0.7)
+    
+    # Добавляем вертикальную линию на нулевой задержке для наглядности
+    plt_figure.axvline(x=0, color='gray', linestyle=':', 
+                label='Нулевая задержка')
     
     return ref_delay_ms
 
@@ -190,8 +193,18 @@ def plot_original_and_by_micro_volumed_reference_signals(
     """
     plt_figure.subplot(*subplot_position)
     
-    # Определяем длину для отображения до 8000 мс
-    display_samples = int(8000 * sample_rate / 1000)  # Количество семплов для 8000 мс
+    # Определяем максимальную длительность для отображения (в мс)
+    # Используем длину обработанного файла, но не менее 8000 мс и не более 40000 мс
+    max_display_ms = max(8000, min(40000, max(len(ref_channel), len(ref_by_micro_volumed_channel)) * 1000 / sample_rate))
+    display_samples = int(max_display_ms * sample_rate / 1000)
+    
+    # Определяем шаг деления оси X в зависимости от длительности
+    if max_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для длительности до 10 секунд
+    elif max_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для длительности от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
     
     # Дополняем оба массива нулями до display_samples
     padded_ref = np.zeros(display_samples)
@@ -204,7 +217,7 @@ def plot_original_and_by_micro_volumed_reference_signals(
     ref_channel = padded_ref
     ref_by_micro_volumed_channel = padded_ref_by_micro_volumed
     
-    logging.info(f"Оригинальный и с измененной громкостью референсные сигналы дополнены нулями до 8000 мс ({display_samples} семплов)")
+    logging.info(f"Оригинальный и с измененной громкостью референсные сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
     
     # Создаем расширенную временную ось для отображения
     display_time_ms = np.arange(display_samples) * 1000 / sample_rate
@@ -215,9 +228,9 @@ def plot_original_and_by_micro_volumed_reference_signals(
     
     plt_figure.title(f'{subplot_position[-1]}. Сравнение оригинального и с измененной громкостью референсных сигналов')
     
-    # Добавляем более детальные деления на оси X
-    plt_figure.xticks(np.arange(0, 8001, 250))  # Деления каждые 250 мс до 8000 мс
-    plt_figure.xlim([0, 8000])  # Фиксированный диапазон до 8000 мс
+    # Добавляем более детальные деления на оси X с динамическим шагом
+    plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
+    plt_figure.xlim([0, max_display_ms])  # Динамический диапазон
     plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
     
     plt_figure.xlabel('Время (мс)')
@@ -245,8 +258,18 @@ def plot_original_reference_and_input_signals(
     """
     plt_figure.subplot(*subplot_position)
     
-    # Определяем длину для отображения до 8000 мс
-    display_samples = int(8000 * sample_rate / 1000)  # Количество семплов для 8000 мс
+    # Определяем максимальную длительность для отображения (в мс)
+    # Используем длину обработанного файла, но не менее 8000 мс и не более 40000 мс
+    max_display_ms = max(8000, min(40000, max(len(ref_by_micro_volumed_delayed_channel), len(in_channel)) * 1000 / sample_rate))
+    display_samples = int(max_display_ms * sample_rate / 1000)
+    
+    # Определяем шаг деления оси X в зависимости от длительности
+    if max_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для длительности до 10 секунд
+    elif max_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для длительности от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
     
     # Дополняем оба массива нулями до display_samples
     padded_ref_delayed = np.zeros(display_samples)
@@ -259,7 +282,7 @@ def plot_original_reference_and_input_signals(
     ref_by_micro_volumed_delayed_channel = padded_ref_delayed
     in_channel = padded_in
     
-    logging.info(f"Задержанный референсный и входной сигналы дополнены нулями до 8000 мс ({display_samples} семплов)")
+    logging.info(f"Задержанный референсный и входной сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
     
     # Создаем расширенную временную ось для отображения
     display_time_ms = np.arange(display_samples) * 1000 / sample_rate
@@ -270,9 +293,9 @@ def plot_original_reference_and_input_signals(
     
     plt_figure.title(f'{subplot_position[-1]}. Задержанный референсный сигнал в микро и входной сигнал')
     
-    # Добавляем более детальные деления на оси X
-    plt_figure.xticks(np.arange(0, 8001, 250))  # Деления каждые 250 мс до 8000 мс
-    plt_figure.xlim([0, 8000])  # Фиксированный диапазон до 8000 мс
+    # Добавляем более детальные деления на оси X с динамическим шагом
+    plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
+    plt_figure.xlim([0, max_display_ms])  # Динамический диапазон
     plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
     
     plt_figure.xlabel('Время (мс)')
@@ -307,157 +330,119 @@ def plot_input_reference_correlation(
     plt_figure.plot(lags_ms, np.abs(correlation), color='green')
     plt_figure.axvline(x=delay_ms, color='r', linestyle='--', 
                 label=f'Измеренная задержка: {delay_ms:.2f} мс, уверенность: {confidence:.2f}')
+                
+    # Добавляем вертикальную линию на нулевой задержке для наглядности
+    plt_figure.axvline(x=0, color='gray', linestyle=':', 
+                label='Нулевая задержка')
 
     plt_figure.title(f'{subplot_position[-1]}. Кросс-корреляция между входным и референсным сигналами')
     plt_figure.xlabel('Задержка (мс)')
     plt_figure.ylabel('Корреляция')
     plt_figure.legend()
 
-    # Устанавливаем диапазон по X от -100 до 1500 мс
-    plt_figure.xlim([-100, 1500])
-    plt_figure.xticks(np.arange(-100, 1501, 250))  # Деления каждые 250 мс
+    # Определяем максимальный диапазон для отображения корреляции и шаг
+    max_corr_display_ms = max(1500, min(delay_ms * 2, 5000))
+    
+    # Определяем шаг деления оси X в зависимости от диапазона
+    if max_corr_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для диапазона до 10 секунд
+    elif max_corr_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для диапазона от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для диапазона более 20 секунд
+    
+    # Устанавливаем диапазон по X от -100 до динамического максимума
+    plt_figure.xlim([-100, max_corr_display_ms])
+    plt_figure.xticks(np.arange(-100, max_corr_display_ms + 1, tick_step_ms))
     # Добавляем сетку
     plt_figure.grid(True, which='both', linestyle='--', alpha=0.7)
-
-def plot_original_signals(
-    plt_figure,
-    subplot_position,
-    ref_channel,
-    in_channel,
-    time_axis_ms,
-    delay_ms
-):
-    """
-    Отображает график исходных сигналов с указанием задержки.
     
-    Args:
-        plt_figure: Объект figure из matplotlib
-        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
-        ref_channel: Массив с референсным сигналом для отображения
-        in_channel: Массив с входным сигналом для отображения
-        time_axis_ms: Временная ось в миллисекундах
-        delay_ms: Вычисленная задержка в миллисекундах
-    """
-    plt_figure.subplot(*subplot_position)
-    plt_figure.plot(time_axis_ms, ref_channel, label='Референсный', alpha=0.7, color='blue')
-    plt_figure.plot(time_axis_ms, in_channel, label='Входной', alpha=0.7, color='green')
-    plt_figure.title(f'{subplot_position[-1]}. Референсный и входной сигналы (задержка: {delay_ms:.2f} мс)')
-
-    # Добавляем более детальные деления на оси X
-    plt_figure.xticks(np.arange(0, time_axis_ms[-1] + 1, 200))  # Деления каждые 200 мс
-    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
-
-    plt_figure.xlabel('Время (мс)')
-    plt_figure.ylabel('Амплитуда')
-    plt_figure.legend()
-    plt_figure.grid(True)
-
-def plot_corrected_signals(
-    plt_figure,
-    subplot_position,
-    ref_channel,
-    in_channel,
-    time_axis_ms,
-    lag,
-    delay_ms
-):
-    """
-    Отображает график сигналов после корректировки задержки.
-    
-    Args:
-        plt_figure: Объект figure из matplotlib
-        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
-        ref_channel: Массив с референсным сигналом для отображения
-        in_channel: Массив с входным сигналом для отображения
-        time_axis_ms: Временная ось в миллисекундах
-        lag: Задержка в семплах
-        delay_ms: Задержка в миллисекундах
-    """
-    plt_figure.subplot(*subplot_position)
-    
-    # Определяем corrected_in_array и corrected_ref_array
-    if lag >= 0:
-        # Входной сигнал задержан относительно референсного
-        corrected_in_array = np.roll(in_channel, -lag)
-        corrected_ref_array = ref_channel
-    else:
-        # Референсный сигнал задержан относительно входного
-        corrected_ref_array = np.roll(ref_channel, lag)
-        corrected_in_array = in_channel
-        
-    # Используем те же цвета, что и на графике оригинальных сигналов
-    plt_figure.plot(time_axis_ms, corrected_ref_array, label='Референсный', alpha=0.7, color='blue')
-    plt_figure.plot(time_axis_ms, corrected_in_array, label='Входной', alpha=0.7, color='green')
-    
-    plt_figure.title(f'{subplot_position[-1]}. Сигналы с учётом задержки ({delay_ms:.2f} мс)')
-    
-    # Добавляем более детальные деления на оси X
-    plt_figure.xticks(np.arange(0, time_axis_ms[-1] + 1, 200))  # Деления каждые 200 мс
-    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
-    
-    plt_figure.xlabel('Время (мс)')
-    plt_figure.ylabel('Амплитуда')
-    plt_figure.grid(True)
-    plt_figure.legend()
-
-def plot_processed_signals(
-    plt_figure,
-    subplot_position,
-    in_channel,
-    processed_channel,
-    time_axis_ms,
-    sample_rate,
-    channels
-):
-    """
-    Отображает график сравнения исходного и обработанного сигналов.
-    
-    Args:
-        plt_figure: Объект figure из matplotlib
-        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
-        in_channel: Массив с входным сигналом для отображения
-        processed_data: Обработанные данные (байты)
-        time_axis_ms: Временная ось в миллисекундах
-        sample_rate: Частота дискретизации
-        channels: Количество каналов
-    """
-    plt_figure.subplot(*subplot_position)
-    
-    # Нормализуем входной сигнал, если он есть
-    if len(in_channel) > 0:
-        in_max = max(abs(np.max(in_channel)), abs(np.min(in_channel)))
-        normalized_in = in_channel / in_max if in_max > 0 else in_channel
-    else:
-        normalized_in = in_channel
-        
-    # Рисуем входной сигнал
-    plt_figure.plot(time_axis_ms, normalized_in, label='Исходный входной', alpha=0.7, color='green', linewidth=1.2)
-
-    # Нормализуем обработанный сигнал
-    if len(processed_channel) > 0:
-        proc_max = max(abs(np.max(processed_channel)), abs(np.min(processed_channel)))
-        normalized_proc = processed_channel / proc_max if proc_max > 0 else processed_channel
-    else:
-        normalized_proc = processed_channel
-    
-    # Сдвигаем нормализованный обработанный сигнал немного вниз для лучшей видимости
-    plt_figure.plot(time_axis_ms, normalized_proc, label='Обработанный AEC', alpha=0.7, color='red', linewidth=1.2)
-    
-    # Добавляем аннотацию о нормализации
-    plt_figure.annotate("Оба сигнала нормализованы для лучшей видимости",
+    # Добавляем аннотацию о том, что анализ выполняется только для положительных задержек
+    plt_figure.annotate("Учитываются только положительные значения задержки",
                     xy=(0.02, 0.95), xycoords='axes fraction', 
                     color='black', fontsize=9, alpha=0.8)
+
+def plot_original_and_by_micro_volumed_reference_correlation(
+    plt_figure,
+    subplot_position,
+    ref_channel,
+    ref_by_micro_volumed_channel,
+    sample_rate
+):
+    """
+    Отображает график кросс-корреляции между оригинальным и изменённым референсными сигналами.
     
-    plt_figure.title(f'{subplot_position[-1]}. Сравнение исходного и обработанного сигналов')
+    Args:
+        plt_figure: Объект figure из matplotlib
+        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
+        ref_channel: Массив с оригинальным референсным сигналом
+        ref_by_micro_volumed_channel: Массив с референсным сигналом измененной громкости
+        sample_rate: Частота дискретизации
     
-    # Добавляем более детальные деления на оси X
-    plt_figure.xticks(np.arange(0, time_axis_ms[-1] + 1, 200))  # Деления каждые 200 мс
-    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
+    Returns:
+        float: Вычисленная задержка в миллисекундах
+    """
+    plt_figure.subplot(*subplot_position)
+
+    # Определяем минимальную длину для корреляции (до 5 секунд)
+    correlation_window = int(5 * sample_rate)
+    actual_correlation_window = min(correlation_window, len(ref_channel), len(ref_by_micro_volumed_channel))
+
+    # Обрезаем оба сигнала до минимальной длины для корреляции
+    ref_for_corr = ref_channel[:actual_correlation_window]
+    ref_by_micro_for_corr = ref_by_micro_volumed_channel[:actual_correlation_window]
+
+    # Вычисляем корреляцию
+    corr = np.correlate(ref_by_micro_for_corr, ref_for_corr, 'full')
+    corr_time = np.arange(len(corr)) - (len(ref_for_corr) - 1)
+    corr_time_ms = corr_time * 1000.0 / sample_rate
+
+    # Анализируем только положительные задержки (> 0 мс)
+    positive_indices = np.where(corr_time > 0)[0]
     
-    plt_figure.xlabel('Время (мс)')
-    plt_figure.ylabel('Нормализованная амплитуда')
-    plt_figure.grid(True)
+    if len(positive_indices) > 0:
+        # Находим максимальное значение корреляции только на положительных задержках
+        max_corr_idx = positive_indices[np.argmax(np.abs(corr[positive_indices]))]
+        ref_delay_samples = corr_time[max_corr_idx]
+        ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
+    else:
+        # Если по какой-то причине нет положительных значений
+        max_corr_idx = np.argmax(np.abs(corr))
+        ref_delay_samples = corr_time[max_corr_idx]
+        ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
+        logging.warning("Не найдено положительных значений задержки в оригинальной корреляции, используется максимальная корреляция")
+
+    # Строим график корреляции
+    plt_figure.plot(corr_time_ms, corr, color='blue')
+    plt_figure.axvline(x=ref_delay_ms, color='r', linestyle='--', 
+                label=f'Измеренная задержка: {ref_delay_ms:.2f} мс')
+
+    plt_figure.title(f'{subplot_position[-1]}. Кросс-корреляция между референсным сигналом и референсным сигналом на входе в микро')
+    plt_figure.xlabel('Задержка (мс)')
+    plt_figure.ylabel('Корреляция')
     plt_figure.legend()
+
+    # Определяем максимальный диапазон для отображения корреляции и шаг
+    max_corr_display_ms = max(1500, min(ref_delay_ms * 2, 5000))
+    
+    # Определяем шаг деления оси X в зависимости от диапазона
+    if max_corr_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для диапазона до 10 секунд
+    elif max_corr_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для диапазона от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для диапазона более 20 секунд
+    
+    # Устанавливаем диапазон по X с учетом найденной задержки
+    plt_figure.xlim([-100, max_corr_display_ms])
+    plt_figure.xticks(np.arange(-100, max_corr_display_ms + 1, tick_step_ms))
+    plt_figure.grid(True, which='both', linestyle='--', alpha=0.7)
+    
+    # Добавляем вертикальную линию на нулевой задержке для наглядности
+    plt_figure.axvline(x=0, color='gray', linestyle=':', 
+                label='Нулевая задержка')
+    
+    return ref_delay_ms
 
 def calculate_signal_delay(in_channel, ref_channel, sample_rate):
     """
@@ -480,12 +465,25 @@ def calculate_signal_delay(in_channel, ref_channel, sample_rate):
     correlation = signal.correlate(in_channel, ref_channel, mode='full')
     lags = signal.correlation_lags(len(in_channel), len(ref_channel), mode='full')
     
-    # Находим индекс максимальной корреляции только с неотрицательной задержкой
-    center_index = len(lags) // 2  # Индекс, соответствующий нулевой задержке
-    # Рассматриваем только неотрицательные лаги (микрофон задержан относительно референса)
-    positive_lags_indices = np.where(lags >= 0)[0]
-    max_corr_idx = positive_lags_indices[np.argmax(np.abs(correlation[positive_lags_indices]))]
-    lag = lags[max_corr_idx]
+    # Находим индекс максимальной корреляции только с положительной задержкой
+    # Положительные лаги означают, что входной сигнал задержан относительно референсного
+    positive_lags_indices = np.where(lags > 0)[0]
+    
+    if len(positive_lags_indices) > 0:
+        # Ищем максимум корреляции только среди положительных лагов
+        max_corr_idx = positive_lags_indices[np.argmax(np.abs(correlation[positive_lags_indices]))]
+        lag = lags[max_corr_idx]
+        
+        # Логируем информацию об использовании только положительных значений
+        logging.info(f"Определение задержки по положительным значениям лагов: выбран лаг {lag}")
+    else:
+        # Для случая, когда все лаги отрицательные или нулевые (редкая ситуация)
+        # Возвращаемся к исходному поведению
+        logging.warning("Не найдено положительных значений лагов, используется прежний метод поиска")
+        center_index = len(lags) // 2  # Индекс, соответствующий нулевой задержке
+        positive_lags_indices = np.where(lags >= 0)[0]
+        max_corr_idx = positive_lags_indices[np.argmax(np.abs(correlation[positive_lags_indices]))]
+        lag = lags[max_corr_idx]
     
     # Вычисляем задержку в миллисекундах
     delay_ms = lag * 1000 / sample_rate
@@ -500,28 +498,6 @@ def calculate_signal_delay(in_channel, ref_channel, sample_rate):
     
     return lag, delay_ms, correlation, lags, confidence
 
-def log_file_info(file_path: str, description: str = ""):
-    """
-    Логирует информацию о WAV файле и возвращает информацию о нём.
-    
-    Args:
-        file_path: Путь к WAV файлу
-        description: Описание файла для логов
-        
-    Returns:
-        tuple: (file_info, channels) - информация о файле и количество каналов
-    """
-    if not file_path or not os.path.exists(file_path):
-        return None, None
-        
-    logging.info(f"visualize_audio_processing: {description}: {file_path}")
-    file_info = get_wav_info(file_path)
-    
-    logging.info(f"  Частота дискретизации: {file_info['framerate']} Гц")
-    logging.info(f"  Длительность: {file_info['duration_ms']/1000:.3f} сек")
-    logging.info(f"  Каналов: {file_info['n_channels']}")
-    
-    return file_info, file_info['n_channels']
 
 def format_array_info(array_name, array, sample_rate):
     """
@@ -699,16 +675,11 @@ def visualize_audio_processing(
         
         # Если задан channels=1 (значение по умолчанию), пробуем определить из файлов
         if channels == 1:
-            # Проверяем файлы для определения количества каналов
-            if input_file_path and os.path.exists(input_file_path):
-                try:
-                    with wave.open(input_file_path, 'rb') as wf:
-                        detected_channels = wf.getnchannels()
-                        if detected_channels in [1, 2]:
-                            channels = detected_channels
-                            logging.info(f"visualize_audio_processing: Определено количество каналов из файла: {channels}")
-                except Exception as e:
-                    logging.warning(f"Не удалось определить количество каналов из файла: {e}")
+            # Проверяем файлы для определения количества каналов через log_file_info
+            _, detected_channels = log_file_info(input_file_path, "Проверка каналов входного файла")
+            if detected_channels and detected_channels in [1, 2]:
+                channels = detected_channels
+                logging.info(f"visualize_audio_processing: Определено количество каналов из файла: {channels}")
         
         # Проверяем корректность значения
         if channels not in [1, 2]:
@@ -790,6 +761,11 @@ def visualize_audio_processing(
         else:
             in_channel = in_array
 
+        if len(processed_array.shape) > 1:
+            processed_channel = processed_array[:, 0]
+        else:
+            processed_channel = processed_array
+
         # Вычисляем задержку между сигналами
         if metrics and all(k in metrics for k in ['delay_samples', 'delay_ms', 'confidence', 'delay_correlation', 'delay_lags']):
             # Используем предрассчитанные данные из AEC
@@ -821,20 +797,21 @@ def visualize_audio_processing(
         logging.info(f"Длительность reference_by_micro_volumed.wav: {ref_by_micro_volumed_duration_ms:.2f} мс")
         logging.info(f"Длительность original_input.wav: {in_duration_ms:.2f} мс")
         logging.info(f"Длительность reference_by_micro_volumed_delayed.wav: {ref_by_micro_volumed_delayed_duration_ms:.2f} мс")
+        logging.info(f"Длительность processed_input.wav: {len(processed_channel) * 1000 / sample_rate:.2f} мс")
 
-        processed_array = bytes_to_numpy(processed_data, sample_rate, channels)
-        if len(processed_array.shape) > 1:
-            processed_channel = processed_array[:, 0]
-        else:
-            processed_channel = processed_array
-
+        # Проверяем и согласовываем длины массивов
+        if len(in_channel) != len(processed_channel):
+            logging.warning(f"Размеры входного ({len(in_channel)}) и обработанного ({len(processed_channel)}) сигналов не совпадают!")
+            logging.info("Приведение длины массивов для корректного отображения...")
+        
         # Находим минимальную длину массивов для корректного отображения
-        min_display_length = min(len(ref_channel), len(in_channel))
+        min_display_length = min(len(ref_channel), len(in_channel), len(processed_channel))
         logging.info(f"Минимальная длина массивов для отображения: {min_display_length} семплов")
 
         # Обрезаем массивы до минимальной длины
         ref_channel = ref_channel[:min_display_length]
         in_channel = in_channel[:min_display_length]
+        processed_channel = processed_channel[:min_display_length]
 
         # Создаем временную ось подходящей длины
         time_axis = np.arange(min_display_length) / sample_rate
@@ -973,11 +950,31 @@ def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
         numpy.ndarray: Аудио-данные в формате numpy массива
     """
     try:
+        if audio_bytes is None:
+            logging.warning("bytes_to_numpy: Получен None вместо байтовых данных")
+            # Возвращаем пустой массив правильного формата
+            return np.array([], dtype=np.float32)
+            
+        # Проверяем, что размер данных не нулевой
+        if len(audio_bytes) == 0:
+            logging.warning("bytes_to_numpy: Получен пустой массив байтов")
+            return np.array([], dtype=np.float32)
+            
         # Логируем размер входных данных в байтах
         logging.info(f"bytes_to_numpy: Получено {len(audio_bytes)} байт данных")
         
+        # Проверяем, что длина байтов четная (для int16)
+        if len(audio_bytes) % 2 != 0:
+            logging.warning(f"bytes_to_numpy: Нечетное количество байтов: {len(audio_bytes)}. Обрезаем последний байт.")
+            audio_bytes = audio_bytes[:-1]
+        
         # Преобразуем байты в numpy массив
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+        
+        # Проверяем, что есть данные после преобразования
+        if len(audio_array) == 0:
+            logging.warning("bytes_to_numpy: После преобразования получен пустой массив")
+            return np.array([], dtype=np.float32)
         
         # Преобразуем одномерный массив в двумерный для стерео данных
         if channels == 2:
@@ -987,7 +984,10 @@ def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
                 audio_array = audio_array.reshape(-1, 2)
                 logging.info(f"bytes_to_numpy: Преобразовано в стерео массив размером {audio_array.shape}")
             else:
-                logging.warning(f"bytes_to_numpy: Нечетное количество элементов для стерео данных: {len(audio_array)}")
+                logging.warning(f"bytes_to_numpy: Нечетное количество элементов для стерео данных: {len(audio_array)}. Добавляем нулевой семпл.")
+                # Добавляем один нулевой семпл, чтобы сделать массив четной длины
+                audio_array = np.append(audio_array, [0])
+                audio_array = audio_array.reshape(-1, 2)
     
         # Вычисляем длительность в зависимости от формата данных
         if len(audio_array.shape) > 1:  # Стерео
@@ -1004,61 +1004,189 @@ def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
         return audio_array
     except Exception as e:
         logging.error(f"Ошибка при преобразовании байтов в numpy массив: {e}")
-        return None
+        logging.exception("Подробная информация об ошибке:")
+        # В случае ошибки возвращаем пустой массив
+        return np.array([], dtype=np.float32)
 
-def plot_original_and_by_micro_volumed_reference_correlation(
+def plot_original_signals(
     plt_figure,
     subplot_position,
     ref_channel,
-    ref_by_micro_volumed_channel,
-    sample_rate
+    in_channel,
+    time_axis_ms,
+    delay_ms
 ):
     """
-    Отображает график кросс-корреляции между оригинальным и изменённым референсными сигналами.
+    Отображает график исходных сигналов с указанием задержки.
     
     Args:
         plt_figure: Объект figure из matplotlib
         subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
-        ref_channel: Массив с оригинальным референсным сигналом
-        ref_by_micro_volumed_channel: Массив с референсным сигналом измененной громкости
-        sample_rate: Частота дискретизации
-    
-    Returns:
-        float: Вычисленная задержка в миллисекундах
+        ref_channel: Массив с референсным сигналом для отображения
+        in_channel: Массив с входным сигналом для отображения
+        time_axis_ms: Временная ось в миллисекундах
+        delay_ms: Вычисленная задержка в миллисекундах
     """
     plt_figure.subplot(*subplot_position)
+    plt_figure.plot(time_axis_ms, ref_channel, label='Референсный', alpha=0.7, color='blue')
+    plt_figure.plot(time_axis_ms, in_channel, label='Входной', alpha=0.7, color='green')
+    plt_figure.title(f'{subplot_position[-1]}. Референсный и входной сигналы (задержка: {delay_ms:.2f} мс)')
 
-    # Определяем минимальную длину для корреляции (до 5 секунд)
-    correlation_window = int(5 * sample_rate)
-    actual_correlation_window = min(correlation_window, len(ref_channel), len(ref_by_micro_volumed_channel))
+    # Определяем максимальное значение для отображения и шаг
+    max_display_ms = time_axis_ms[-1]
+    
+    # Определяем шаг деления оси X в зависимости от длительности
+    if max_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для длительности до 10 секунд
+    elif max_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для длительности от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
+        
+    # Добавляем более детальные деления на оси X
+    plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
+    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
 
-    # Обрезаем оба сигнала до минимальной длины для корреляции
-    ref_for_corr = ref_channel[:actual_correlation_window]
-    ref_by_micro_for_corr = ref_by_micro_volumed_channel[:actual_correlation_window]
+    plt_figure.xlabel('Время (мс)')
+    plt_figure.ylabel('Амплитуда')
+    plt_figure.legend()
+    plt_figure.grid(True)
 
-    # Вычисляем корреляцию
-    corr = np.correlate(ref_by_micro_for_corr, ref_for_corr, 'full')
-    corr_time = np.arange(len(corr)) - (len(ref_for_corr) - 1)
-    corr_time_ms = corr_time * 1000.0 / sample_rate
-
-    # Находим максимальное значение корреляции и соответствующую задержку
-    max_corr_idx = np.argmax(corr)
-    ref_delay_samples = corr_time[max_corr_idx]
-    ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
-
-    # Строим график корреляции
-    plt_figure.plot(corr_time_ms, corr, color='blue')
-    plt_figure.axvline(x=ref_delay_ms, color='r', linestyle='--', 
-                label=f'Измеренная задержка: {ref_delay_ms:.2f} мс')
-
-    plt_figure.title(f'{subplot_position[-1]}. Кросс-корреляция между референсным сигналом и референсным сигналом на входе в микро')
-    plt_figure.xlabel('Задержка (мс)')
-    plt_figure.ylabel('Корреляция')
+def plot_corrected_signals(
+    plt_figure,
+    subplot_position,
+    ref_channel,
+    in_channel,
+    time_axis_ms,
+    lag,
+    delay_ms
+):
+    """
+    Отображает график сигналов после корректировки задержки.
+    
+    Args:
+        plt_figure: Объект figure из matplotlib
+        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
+        ref_channel: Массив с референсным сигналом для отображения
+        in_channel: Массив с входным сигналом для отображения
+        time_axis_ms: Временная ось в миллисекундах
+        lag: Задержка в семплах
+        delay_ms: Задержка в миллисекундах
+    """
+    plt_figure.subplot(*subplot_position)
+    
+    # Определяем corrected_in_array и corrected_ref_array
+    if lag >= 0:
+        # Входной сигнал задержан относительно референсного
+        corrected_in_array = np.roll(in_channel, -lag)
+        corrected_ref_array = ref_channel
+    else:
+        # Референсный сигнал задержан относительно входного
+        corrected_ref_array = np.roll(ref_channel, lag)
+        corrected_in_array = in_channel
+        
+    # Используем те же цвета, что и на графике оригинальных сигналов
+    plt_figure.plot(time_axis_ms, corrected_ref_array, label='Референсный', alpha=0.7, color='blue')
+    plt_figure.plot(time_axis_ms, corrected_in_array, label='Входной', alpha=0.7, color='green')
+    
+    plt_figure.title(f'{subplot_position[-1]}. Сигналы с учётом задержки ({delay_ms:.2f} мс)')
+    
+    # Определяем максимальное значение для отображения и шаг
+    max_display_ms = time_axis_ms[-1]
+    
+    # Определяем шаг деления оси X в зависимости от длительности
+    if max_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для длительности до 10 секунд
+    elif max_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для длительности от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
+        
+    # Добавляем более детальные деления на оси X
+    plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
+    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
+    
+    plt_figure.xlabel('Время (мс)')
+    plt_figure.ylabel('Амплитуда')
+    plt_figure.grid(True)
     plt_figure.legend()
 
-    # Устанавливаем диапазон по X
-    plt_figure.xlim([-100, 1500])
-    plt_figure.xticks(np.arange(-100, 1501, 250))
-    plt_figure.grid(True, which='both', linestyle='--', alpha=0.7)
+def plot_processed_signals(
+    plt_figure,
+    subplot_position,
+    in_channel,
+    processed_channel,
+    time_axis_ms,
+    sample_rate,
+    channels
+):
+    """
+    Отображает график сравнения исходного и обработанного сигналов.
     
-    return ref_delay_ms
+    Args:
+        plt_figure: Объект figure из matplotlib
+        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
+        in_channel: Массив с входным сигналом для отображения
+        processed_data: Обработанные данные (байты)
+        time_axis_ms: Временная ось в миллисекундах
+        sample_rate: Частота дискретизации
+        channels: Количество каналов
+    """
+    plt_figure.subplot(*subplot_position)
+    
+    # Проверяем и приводим к одинаковой длине, если размеры массивов не совпадают
+    if len(in_channel) != len(processed_channel):
+        logging.info(f"Размеры входного ({len(in_channel)}) и обработанного ({len(processed_channel)}) сигналов не совпадают. Приводим к одинаковой длине.")
+        min_length = min(len(in_channel), len(processed_channel))
+        in_channel = in_channel[:min_length]
+        processed_channel = processed_channel[:min_length]
+        # Также обновляем time_axis_ms до минимальной длины
+        time_axis_ms = time_axis_ms[:min_length]
+        logging.info(f"Новая длина сигналов: {min_length}")
+    
+    # Нормализуем входной сигнал, если он есть
+    if len(in_channel) > 0:
+        in_max = max(abs(np.max(in_channel)), abs(np.min(in_channel)))
+        normalized_in = in_channel / in_max if in_max > 0 else in_channel
+    else:
+        normalized_in = in_channel
+        
+    # Рисуем входной сигнал
+    plt_figure.plot(time_axis_ms, normalized_in, label='Исходный входной', alpha=0.7, color='green', linewidth=1.2)
+
+    # Нормализуем обработанный сигнал
+    if len(processed_channel) > 0:
+        proc_max = max(abs(np.max(processed_channel)), abs(np.min(processed_channel)))
+        normalized_proc = processed_channel / proc_max if proc_max > 0 else processed_channel
+    else:
+        normalized_proc = processed_channel
+    
+    # Сдвигаем нормализованный обработанный сигнал немного вниз для лучшей видимости
+    plt_figure.plot(time_axis_ms, normalized_proc, label='Обработанный AEC', alpha=0.7, color='red', linewidth=1.2)
+    
+    # Добавляем аннотацию о нормализации
+    plt_figure.annotate("Оба сигнала нормализованы для лучшей видимости",
+                    xy=(0.02, 0.95), xycoords='axes fraction', 
+                    color='black', fontsize=9, alpha=0.8)
+    
+    plt_figure.title(f'{subplot_position[-1]}. Сравнение исходного и обработанного сигналов')
+    
+    # Определяем максимальное значение для отображения и шаг
+    max_display_ms = time_axis_ms[-1]
+    
+    # Определяем шаг деления оси X в зависимости от длительности
+    if max_display_ms <= 10000:
+        tick_step_ms = 250  # шаг 250мс для длительности до 10 секунд
+    elif max_display_ms <= 20000:
+        tick_step_ms = 500  # шаг 500мс для длительности от 10 до 20 секунд
+    else:
+        tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
+        
+    # Добавляем более детальные деления на оси X
+    plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
+    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
+    
+    plt_figure.xlabel('Время (мс)')
+    plt_figure.ylabel('Нормализованная амплитуда')
+    plt_figure.grid(True)
+    plt_figure.legend()

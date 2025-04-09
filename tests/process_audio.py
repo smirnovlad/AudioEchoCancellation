@@ -69,13 +69,15 @@ except ImportError:
     logging.error("Не удалось импортировать WebRTCAECSession из пакета aec")
     sys.exit(1)
 
-# Импортируем функции из aec_test_tool.py
+# Импортируем функции из aec_test_tool.py и utils.py
 try:
     from aec_test_tool import calculate_metrics
     from visualization import visualize_audio_processing
-    logging.info("Функции из aec_test_tool.py успешно импортированы")
-except ImportError:
-    logging.error("Не удалось импортировать функции из aec_test_tool.py")
+    # Импортируем функции из utils.py для анализа WAV файлов
+    from utils import get_wav_info, log_file_info, format_wav_info, get_wav_amplitude_stats
+    logging.info("Функции из необходимых модулей успешно импортированы")
+except ImportError as e:
+    logging.error(f"Не удалось импортировать функции из необходимых модулей: {e}")
     sys.exit(1)
 
 def find_test_directories(base_dir="tests"):
@@ -115,7 +117,7 @@ def find_test_directories(base_dir="tests"):
                     sub_dir_path = os.path.join(ref_type_path, d)
                     if os.path.isdir(sub_dir_path) and d.startswith("volume_"):
                         found_sub_dirs.append(sub_dir_path)
-                        logging.debug(f"Найдена директория: {sub_dir_path}")
+                        logging.info(f"Найдена директория: {sub_dir_path}")
             else:
                 # Для reference_by_micro сначала ищем директории с задержками (delay_XX)
                 for delay_dir in os.listdir(ref_type_path):
@@ -126,7 +128,7 @@ def find_test_directories(base_dir="tests"):
                             vol_dir_path = os.path.join(delay_dir_path, vol_dir)
                             if os.path.isdir(vol_dir_path) and vol_dir.startswith("volume_"):
                                 found_sub_dirs.append(vol_dir_path)
-                                logging.debug(f"Найдена директория: {vol_dir_path}")
+                                logging.info(f"Найдена директория: {vol_dir_path}")
         
         if found_sub_dirs:
             test_dirs[main_dir] = found_sub_dirs
@@ -172,89 +174,115 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
     try:
         logging.info(f"Обработка файла {input_file} с помощью AEC...")
         
-        # Чтение референсного файла и определение его параметров
+        # Используем utils.py для подробного анализа всех WAV файлов
+        logging.info("\n=== Детальный анализ входных файлов ===")
+        
+        # Анализируем референсный файл
+        logging.info("\n>>> Анализ референсного файла <<<")
+        ref_info, ref_channels = log_file_info(reference_file, "Референсный файл")
+        if not ref_info:
+            logging.error(f"Не удалось получить информацию о референсном файле {reference_file}")
+            return {}
+            
+        # Анализируем входной файл
+        logging.info("\n>>> Анализ входного файла <<<")
+        input_info, in_channels = log_file_info(input_file, "Входной файл")
+        if not input_info:
+            logging.error(f"Не удалось получить информацию о входном файле {input_file}")
+            return {}
+            
+        # Анализируем файл reference_by_micro_volumed.wav, если он существует
+        ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
+        ref_vol_info = None
+        ref_vol_data = None
+        
+        if os.path.exists(ref_vol_file):
+            logging.info("\n>>> Анализ файла с измененной громкостью <<<")
+            ref_vol_info, _ = log_file_info(ref_vol_file, "Референсный файл с измененной громкостью")
+            
+            # Читаем данные из файла с измененной громкостью
+            try:
+                with wave.open(ref_vol_file, 'rb') as ref_vol_wf:
+                    ref_vol_data = ref_vol_wf.readframes(ref_vol_wf.getnframes())
+            except Exception as e:
+                logging.warning(f"Не удалось прочитать файл {ref_vol_file}: {e}")
+            
+        # Анализируем задержанный референсный файл, если он существует
+        reference_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed_delayed.wav")
+        ref_delayed_info = None
+        ref_delayed_data = None
+        
+        if os.path.exists(reference_delayed_file):
+            logging.info("\n>>> Анализ задержанного референсного файла <<<")
+            ref_delayed_info, _ = log_file_info(reference_delayed_file, "Задержанный референсный файл")
+            
+            # Читаем данные из задержанного файла
+            try:
+                with wave.open(reference_delayed_file, 'rb') as ref_delayed_wf:
+                    ref_delayed_data = ref_delayed_wf.readframes(ref_delayed_wf.getnframes())
+                    
+                # Вычисляем задержку как разницу длительностей между оригинальным и задержанным файлом
+                if ref_info and ref_delayed_info:
+                    delay_diff_ms = ref_delayed_info['duration_ms'] - ref_info['duration_ms']
+                    logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {delay_diff_ms:.2f} мс")
+            except Exception as e:
+                logging.warning(f"Не удалось прочитать задержанный референсный файл: {e}")
+        
+        # Анализируем статистику амплитуд
+        ref_stats = get_wav_amplitude_stats(reference_file)
+        if ref_stats:
+            logging.info("\n>>> Статистика амплитуд референсного файла <<<")
+            for stats in ref_stats:
+                ch = stats['channel']
+                logging.info(f"Канал {ch}: мин={stats['min']:.6f}, макс={stats['max']:.6f}, сред={stats['mean']:.6f}, RMS={stats['rms']:.6f}")
+        
+        in_stats = get_wav_amplitude_stats(input_file)
+        if in_stats:
+            logging.info("\n>>> Статистика амплитуд входного файла <<<")
+            for stats in in_stats:
+                ch = stats['channel']
+                logging.info(f"Канал {ch}: мин={stats['min']:.6f}, макс={stats['max']:.6f}, сред={stats['mean']:.6f}, RMS={stats['rms']:.6f}")
+        
+        # Сравнение характеристик файлов
+        logging.info("\n=== Проверка совместимости файлов ===")
+        
+        # Проверяем частоты дискретизации
+        if ref_info['framerate'] != input_info['framerate']:
+            logging.warning(f"Частоты дискретизации файлов не совпадают: {ref_info['framerate']} vs {input_info['framerate']}")
+            logging.warning("Для корректной работы AEC необходимы одинаковые частоты дискретизации")
+        else:
+            logging.info(f"Частоты дискретизации файлов совпадают: {ref_info['framerate']} Гц")
+            
+        # Проверяем количество каналов
+        if ref_info['n_channels'] != input_info['n_channels']:
+            logging.warning(f"Количество каналов в файлах не совпадает: {ref_info['n_channels']} vs {input_info['n_channels']}")
+            logging.warning("AEC будет использовать количество каналов из входного файла")
+        else:
+            logging.info(f"Количество каналов в файлах совпадает: {ref_info['n_channels']}")
+            
+        # Используем количество каналов из входного файла
+        channels = input_info['n_channels']
+        logging.info(f"Используем количество каналов: {channels}")
+        
+        # Проверяем длительность
+        if abs(ref_info['duration_ms'] - input_info['duration_ms']) > 500: # Если разница более 500 мс
+            logging.warning(f"Длительности файлов существенно различаются: {ref_info['duration_sec']:.3f}s vs {input_info['duration_sec']:.3f}s")
+            logging.warning("Для обработки будет использована минимальная длина")
+        else:
+            logging.info(f"Длительности файлов примерно совпадают (разница {abs(ref_info['duration_ms'] - input_info['duration_ms']):.2f} мс)")
+        
+        # Чтение данных
         with wave.open(reference_file, 'rb') as ref_wf:
             ref_data = ref_wf.readframes(ref_wf.getnframes())
-            ref_data = np.frombuffer(ref_data, dtype=np.int16).copy()
-            ref_data = ref_data.reshape(-1, ref_wf.getnchannels())
-            ref_data[:, 0] = ref_data[:, 1]
-            ref_data = ref_data.tobytes()
             ref_frames_count = ref_wf.getnframes()
             ref_rate = ref_wf.getframerate()
-            ref_channels = ref_wf.getnchannels()
             ref_duration_ms = ref_frames_count * 1000 / ref_rate
-            logging.info(f"Референсный файл: длительность {ref_duration_ms:.2f} мс ({ref_duration_ms/1000:.2f} с), {ref_rate} Гц, {ref_channels} канала(ов)")
-            
-        # Чтение входного файла и определение его параметров
+
         with wave.open(input_file, 'rb') as in_wf:
             in_data = in_wf.readframes(in_wf.getnframes())
             in_frames_count = in_wf.getnframes()
             in_rate = in_wf.getframerate()
-            in_channels = in_wf.getnchannels()
             in_duration_ms = in_frames_count * 1000 / in_rate
-            logging.info(f"Входной файл: длительность {in_duration_ms:.2f} мс ({in_duration_ms/1000:.2f} с), {in_rate} Гц, {in_channels} канала(ов)")
-        
-        # Определяем, нужно ли конвертировать моно в стерео или наоборот
-        # Для WebRTC AEC используем количество каналов из входного файла
-        channels = in_channels
-        logging.info(f"Используем количество каналов: {channels}")
-        
-        # Попытка чтения файла reference_by_micro_volumed.wav
-        ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
-        ref_vol_data = None
-        
-        if os.path.exists(ref_vol_file):
-            try:
-                with wave.open(ref_vol_file, 'rb') as ref_vol_wf:
-                    ref_vol_data = ref_vol_wf.readframes(ref_vol_wf.getnframes())
-                    ref_vol_frames_count = ref_vol_wf.getnframes()
-                    ref_vol_rate = ref_vol_wf.getframerate()
-                    ref_vol_duration_ms = ref_vol_frames_count * 1000 / ref_vol_rate
-                    logging.info(f"Референсный файл с измененной громкостью: длительность {ref_vol_duration_ms:.2f} мс ({ref_vol_duration_ms/1000:.2f} с), {ref_vol_rate} Гц")
-            except Exception as e:
-                logging.warning(f"Не удалось прочитать файл reference_by_micro_volumed.wav: {e}")
-                ref_vol_data = None
-        
-        # Попытка чтения задержанного референсного файла (reference_by_micro_volumed_delayed.wav)
-        reference_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed_delayed.wav")
-        ref_delayed_data = None
-        
-        if os.path.exists(reference_delayed_file):
-            try:
-                with wave.open(reference_delayed_file, 'rb') as ref_delayed_wf:
-                    ref_delayed_data = ref_delayed_wf.readframes(ref_delayed_wf.getnframes())
-                    ref_delayed_frames_count = ref_delayed_wf.getnframes()
-                    ref_delayed_rate = ref_delayed_wf.getframerate()
-                    ref_delayed_duration_ms = ref_delayed_frames_count * 1000 / ref_delayed_rate
-                    logging.info(f"Задержанный референсный файл: длительность {ref_delayed_duration_ms:.2f} мс ({ref_delayed_duration_ms/1000:.2f} с), {ref_delayed_rate} Гц")
-                    
-                    # Вычисляем задержку как разницу длительностей
-                    delay_diff_ms = ref_delayed_duration_ms - ref_duration_ms
-                    logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {delay_diff_ms:.2f} мс")
-            except Exception as e:
-                logging.warning(f"Не удалось прочитать задержанный референсный файл: {e}")
-                ref_delayed_data = None
-        
-        # Если количество каналов не совпадает, конвертируем данные
-        if ref_channels != in_channels:
-            logging.warning(f"Количество каналов в файлах не совпадает: {ref_channels} vs {in_channels}")
-            logging.warning("Выполняется конвертация каналов...")
-            
-            # Для корректной работы WebRTC AEC, приводим оба файла к одинаковому количеству каналов
-            # Это надо делать здесь, а не внутри WebRTC, иначе будут ошибки
-        
-        # Проверяем частоты дискретизации
-        if ref_rate != in_rate:
-            logging.warning(f"Частоты дискретизации файлов не совпадают: {ref_rate} vs {in_rate}")
-            logging.warning("Для корректной работы AEC необходимы одинаковые частоты дискретизации")
-            
-            # В этом случае нужно выполнить ресемплинг одного из файлов
-            # Это делается вне этой функции, в процессе подготовки данных
-            
-        # Проверяем количество фреймов
-        if ref_frames_count != in_frames_count:
-            logging.warning(f"Количество фреймов в файлах не совпадает: {ref_frames_count} vs {in_frames_count}")
-            logging.warning("Для корректной работы AEC будет использована минимальная длина")
         
         # Преобразуем байты в NumPy массивы
         ref_np = np.frombuffer(ref_data, dtype=np.int16)
@@ -273,7 +301,7 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         )
         
         # Оценка и установка задержки
-        delay_samples, delay_ms, confidence = aec_session.auto_set_delay(ref_data, in_data)
+        delay_samples, delay_ms, confidence = aec_session.auto_set_delay(ref_data, in_data, actual_delay_ms=0)
         logging.info(f"Обнаружена задержка: {delay_samples} семплов ({delay_ms:.2f} мс), уверенность: {confidence:.4f}")
         
         # Получаем данные корреляции из последнего вычисления, если такой метод существует
@@ -295,25 +323,104 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         min_frames = min(len(ref_frames), len(in_frames))
         logging.info(f"Количество фреймов: референс={len(ref_frames)}, вход={len(in_frames)}, обработка={min_frames}")
         
+        # Анализ и логирование информации о фреймах
+        if len(ref_frames) > 0 and len(in_frames) > 0:
+            ref_frame_size = len(ref_frames[0])
+            in_frame_size = len(in_frames[0])
+            ref_frame_samples = ref_frame_size // (2 * channels)  # 2 байта на сэмпл (16 бит)
+            in_frame_samples = in_frame_size // (2 * channels)
+            
+            # Информация о размере фреймов
+            logging.info(f"Размер референсного фрейма: {ref_frame_size} байт, {ref_frame_samples} сэмплов, длительность {ref_frame_samples/sample_rate*1000:.2f} мс")
+            logging.info(f"Размер входного фрейма: {in_frame_size} байт, {in_frame_samples} сэмплов, длительность {in_frame_samples/sample_rate*1000:.2f} мс")
+            
+            # Дополнительная информация о первом фрейме каждого типа
+            try:
+                ref_frame_np = np.frombuffer(ref_frames[0], dtype=np.int16)
+                in_frame_np = np.frombuffer(in_frames[0], dtype=np.int16)
+                
+                ref_channels_data = ref_frame_np.reshape(-1, channels) if channels > 1 else ref_frame_np
+                in_channels_data = in_frame_np.reshape(-1, channels) if channels > 1 else in_frame_np
+                
+                # Информация о каналах
+                if channels > 1:
+                    ref_ch1_min, ref_ch1_max = np.min(ref_channels_data[:,0]), np.max(ref_channels_data[:,0])
+                    ref_ch2_min, ref_ch2_max = np.min(ref_channels_data[:,1]), np.max(ref_channels_data[:,1])
+                    in_ch1_min, in_ch1_max = np.min(in_channels_data[:,0]), np.max(in_channels_data[:,0])
+                    in_ch2_min, in_ch2_max = np.min(in_channels_data[:,1]), np.max(in_channels_data[:,1])
+                    
+                    logging.info(f"Референсный фрейм: Канал 1 [мин={ref_ch1_min}, макс={ref_ch1_max}], Канал 2 [мин={ref_ch2_min}, макс={ref_ch2_max}]")
+                    logging.info(f"Входной фрейм: Канал 1 [мин={in_ch1_min}, макс={in_ch1_max}], Канал 2 [мин={in_ch2_min}, макс={in_ch2_max}]")
+                else:
+                    ref_min, ref_max = np.min(ref_channels_data), np.max(ref_channels_data)
+                    in_min, in_max = np.min(in_channels_data), np.max(in_channels_data)
+                    
+                    logging.info(f"Референсный фрейм: [мин={ref_min}, макс={ref_max}]")
+                    logging.info(f"Входной фрейм: [мин={in_min}, макс={in_max}]")
+                
+                # Информация об энергии сигнала
+                ref_energy = np.sum(ref_frame_np.astype(np.float32)**2) / len(ref_frame_np)
+                in_energy = np.sum(in_frame_np.astype(np.float32)**2) / len(in_frame_np)
+                
+                logging.info(f"Энергия референсного фрейма: {ref_energy:.2f}")
+                logging.info(f"Энергия входного фрейма: {in_energy:.2f}")
+                logging.info(f"Соотношение энергий (вход/референс): {in_energy/ref_energy if ref_energy > 0 else 'N/A'}")
+            except Exception as e:
+                logging.warning(f"Не удалось проанализировать содержимое фреймов: {e}")
+        
         # Буферизация для компенсации задержки
         delay_frames = int(delay_samples / frame_size)
-        pre_buffer_size = max(5, delay_frames) # Минимум 5 фреймов для предварительной буферизации
-        
+        # pre_buffer_size = max(5, delay_frames) # Минимум 5 фреймов для предварительной буферизации
+        pre_buffer_size = 0
+
         # Предварительная буферизация референсных фреймов
         for i in range(min(pre_buffer_size, len(ref_frames))):
+            logging.info(f"Буферизация референсного фрейма #{i}, размер: {len(ref_frames[i])} байт")
             aec_session.add_reference_frame(ref_frames[i])
         
         # Обработка фреймов
         processed_frames = []
         
+        # Интервал логирования подробной информации о фреймах
+        frame_log_interval = min(100, min_frames // 10 if min_frames > 10 else 1)
+        
         for i in range(min_frames):
             # Добавляем референсный фрейм с учетом задержки
             ref_idx = i + pre_buffer_size
             if ref_idx < len(ref_frames):
+                # Подробное логирование для первого фрейма и каждые frame_log_interval фреймов
+                if i == 0 or i % frame_log_interval == 0:
+                    ref_data_np = np.frombuffer(ref_frames[ref_idx], dtype=np.int16)
+                    ref_energy = np.sum(ref_data_np.astype(np.float32)**2) / len(ref_data_np)
+                    logging.info(f"Референсный фрейм #{ref_idx}: размер={len(ref_frames[ref_idx])} байт, энергия={ref_energy:.2f}")
+                
                 aec_session.add_reference_frame(ref_frames[ref_idx])
             
-            # Обрабатываем входной фрейм
+            # Обрабатываем входной фрейм с дополнительным логированием
+            if i == 0 or i % frame_log_interval == 0:
+                in_data_np = np.frombuffer(in_frames[i], dtype=np.int16)
+                in_energy = np.sum(in_data_np.astype(np.float32)**2) / len(in_data_np)
+                logging.info(f"Входной фрейм #{i}: размер={len(in_frames[i])} байт, энергия={in_energy:.2f}")
+            
             processed_frame = aec_session.process_frame(in_frames[i])
+            
+            # Подробное логирование обработанного фрейма
+            if i == 0 or i % frame_log_interval == 0:
+                proc_data_np = np.frombuffer(processed_frame, dtype=np.int16)
+                proc_energy = np.sum(proc_data_np.astype(np.float32)**2) / len(proc_data_np)
+                logging.info(f"Обработанный фрейм #{i}: размер={len(processed_frame)} байт, энергия={proc_energy:.2f}")
+                
+                # Если это первый фрейм, добавим более подробную информацию
+                if i == 0:
+                    if channels > 1:
+                        proc_channels_data = proc_data_np.reshape(-1, channels)
+                        proc_ch1_min, proc_ch1_max = np.min(proc_channels_data[:,0]), np.max(proc_channels_data[:,0])
+                        proc_ch2_min, proc_ch2_max = np.min(proc_channels_data[:,1]), np.max(proc_channels_data[:,1])
+                        logging.info(f"Обработанный фрейм: Канал 1 [мин={proc_ch1_min}, макс={proc_ch1_max}], Канал 2 [мин={proc_ch2_min}, макс={proc_ch2_max}]")
+                    else:
+                        proc_min, proc_max = np.min(proc_data_np), np.max(proc_data_np)
+                        logging.info(f"Обработанный фрейм: [мин={proc_min}, макс={proc_max}]")
+            
             processed_frames.append(processed_frame)
             
             # Логируем прогресс каждые 100 фреймов
@@ -455,7 +562,7 @@ def process_test_directory(dir_path, output_dir=None, frame_size_ms=10.0, visual
         dict: Метрики и результаты обработки
     """
     # Задаем уровень логирования в зависимости от verbose
-    log_level = logging.DEBUG if verbose else logging.INFO
+    log_level = logging.info if verbose else logging.INFO
     logging.getLogger().setLevel(log_level)
     
     # Всегда сохраняем метрики в той же директории, где находятся аудиофайлы
@@ -846,7 +953,7 @@ def main():
     args = parser.parse_args()
     
     # Настраиваем логирование
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_level = logging.info if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
     
     logging.info("Запуск пакетной обработки тестовых данных с WebRTC AEC")

@@ -101,6 +101,7 @@ def prepare_all_test_directories():
         os.path.join(base_dir, "music"),
         os.path.join(base_dir, "agent_speech"),
         os.path.join(base_dir, "agent_user_speech"),
+        os.path.join(base_dir, "agent_speech_30_sec"),
     ]
     
     for test_dir in test_dirs:
