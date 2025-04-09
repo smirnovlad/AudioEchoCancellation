@@ -175,6 +175,10 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         # Чтение референсного файла и определение его параметров
         with wave.open(reference_file, 'rb') as ref_wf:
             ref_data = ref_wf.readframes(ref_wf.getnframes())
+            ref_data = np.frombuffer(ref_data, dtype=np.int16).copy()
+            ref_data = ref_data.reshape(-1, ref_wf.getnchannels())
+            ref_data[:, 0] = ref_data[:, 1]
+            ref_data = ref_data.tobytes()
             ref_frames_count = ref_wf.getnframes()
             ref_rate = ref_wf.getframerate()
             ref_channels = ref_wf.getnchannels()
@@ -373,7 +377,12 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                 
                 # Проверяем основные файлы
                 logging.info(f"Используемая частота дискретизации для визуализации: {sample_rate} Гц")
-                
+                # Проверяем reference.wav
+                ref_file = os.path.join(os.path.dirname(reference_file), "reference.wav")
+                if os.path.exists(ref_file):
+                    with wave.open(ref_file, 'rb') as wf:
+                        logging.info(f"reference.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
+
                 # Проверяем reference_by_micro_volumed.wav
                 ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
                 if os.path.exists(ref_vol_file):
@@ -402,7 +411,7 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                 visualize_audio_processing(
                     output_dir=output_dir,
                     reference_data=ref_data,
-                    reference_file_path=reference_file,
+                    reference_file_path=ref_file,
                     reference_by_micro_volumed_data=ref_vol_data,
                     reference_by_micro_volumed_file_path=ref_vol_file,
                     reference_by_micro_volumed_delayed_data=ref_delayed_data,
@@ -411,8 +420,6 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                     input_file_path=input_file,
                     processed_data=processed_data,
                     processed_file_path=output_file,
-                    reference_delayed_data=ref_delayed_data,
-                    reference_delayed_file_path=reference_delayed_file,
                     sample_rate=sample_rate,
                     channels=channels,
                     metrics=metrics  # передаем метрики с данными корреляции

@@ -171,7 +171,7 @@ class WebRTCAECSession:
             frame_size_samples = frame_size_bytes // (2 * self.channels)  # 2 байта на сэмпл (16 бит)
             frame_size_ms = frame_size_samples / self.sample_rate * 1000
             
-            logging.debug(f"Референсный фрейм: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
+            logging.info(f"Референсный фрейм: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
             
             # Проверяем, нужно ли масштабировать референсный сигнал
             ref_array = np.frombuffer(frame_bytes, dtype=np.int16)
@@ -180,20 +180,20 @@ class WebRTCAECSession:
             if self.reference_scale_factor != 1.0:
                 ref_array = (ref_array * self.reference_scale_factor).astype(np.int16)
                 frame_bytes = ref_array.tobytes()
-                logging.debug(f"Применен коэффициент масштабирования референсного сигнала: {self.reference_scale_factor}")
+                logging.info(f"Применен коэффициент масштабирования референсного сигнала: {self.reference_scale_factor}")
             
             # Дополнительная проверка на слишком низкую амплитуду
             max_amplitude = np.max(np.abs(ref_array))
             if max_amplitude > 0 and max_amplitude < 327 and self.scaling_enabled:  # Если амплитуда меньше 1% от максимальной (32768)
                 # Вычисляем коэффициент масштабирования (увеличиваем в 10 раз, но не больше максимума)
                 scale_factor = min(10.0, 32767 / max_amplitude)
-                logging.debug(f"Масштабирование референсного сигнала: амплитуда {max_amplitude}, коэффициент {scale_factor}")
+                logging.info(f"Масштабирование референсного сигнала: амплитуда {max_amplitude}, коэффициент {scale_factor}")
                 
                 # Масштабируем сигнал
                 scaled_array = (ref_array * scale_factor).astype(np.int16)
                 frame_bytes = scaled_array.tobytes()
             elif max_amplitude > 0 and max_amplitude < 327 and not self.scaling_enabled:
-                logging.debug(f"Обнаружена низкая амплитуда референсного сигнала ({max_amplitude}), но масштабирование ВЫКЛЮЧЕНО")
+                logging.info(f"Обнаружена низкая амплитуда референсного сигнала ({max_amplitude}), но масштабирование ВЫКЛЮЧЕНО")
             
             if self.batch_mode:
                 # В пакетном режиме сохраняем фрейм для последующей обработки
@@ -215,19 +215,19 @@ class WebRTCAECSession:
                                 chunk = frame_bytes[i:i+expected_size]
                                 chunk_samples = len(chunk) // (2 * self.channels)
                                 chunk_ms = chunk_samples / self.sample_rate * 1000
-                                logging.debug(f"Обработка части референсного фрейма: {chunk_samples} сэмплов, {len(chunk)} байт, {chunk_ms:.2f} мс")
+                                logging.info(f"Обработка части референсного фрейма: {chunk_samples} сэмплов, {len(chunk)} байт, {chunk_ms:.2f} мс")
                                 
                                 # Используем process_reverse_stream из audio_processing.h
                                 self.apm.process_reverse_stream(chunk)
                                 
                                 self.stats["reference_frames"] += 1
                                 chunks_count += 1
-                        logging.debug(f"Референсный фрейм разделен на {chunks_count} частей")
+                        logging.info(f"Референсный фрейм разделен на {chunks_count} частей")
                     else:
                         # Если фрейм слишком маленький, дополняем его нулями
                         padding_size = expected_size - frame_size_bytes
                         padded_frame = frame_bytes + b'\x00' * padding_size
-                        logging.debug(f"Референсный фрейм дополнен нулями до {expected_size} байт, {self.frame_size_ms} мс")
+                        logging.info(f"Референсный фрейм дополнен нулями до {expected_size} байт, {self.frame_size_ms} мс")
                         
                         # Используем process_reverse_stream из audio_processing.h
                         self.apm.process_reverse_stream(padded_frame)
@@ -235,7 +235,7 @@ class WebRTCAECSession:
                         self.stats["reference_frames"] += 1
                 else:
                     # Если размер фрейма соответствует ожидаемому, обрабатываем его напрямую
-                    logging.debug(f"Обработка референсного фрейма стандартного размера: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
+                    logging.info(f"Обработка референсного фрейма стандартного размера: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
                     
                     # Используем process_reverse_stream из audio_processing.h
                     self.apm.process_reverse_stream(frame_bytes)
@@ -292,7 +292,7 @@ class WebRTCAECSession:
             frame_size_samples = frame_size_bytes // (2 * self.channels)  # 2 байта на сэмпл (16 бит)
             frame_size_ms = frame_size_samples / self.sample_rate * 1000
             
-            logging.debug(f"Входной фрейм: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
+            logging.info(f"Входной фрейм: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
             
             # Нормализация входного сигнала
             input_array = np.frombuffer(frame_bytes, dtype=np.int16)
@@ -301,20 +301,20 @@ class WebRTCAECSession:
             if self.input_scale_factor != 1.0:
                 input_array = (input_array * self.input_scale_factor).astype(np.int16)
                 frame_bytes = input_array.tobytes()
-                logging.debug(f"Применен коэффициент масштабирования входного сигнала: {self.input_scale_factor}")
+                logging.info(f"Применен коэффициент масштабирования входного сигнала: {self.input_scale_factor}")
             
             # Дополнительная проверка на слишком высокую амплитуду
             max_amplitude = np.max(np.abs(input_array))
             if max_amplitude > 3276 and self.scaling_enabled:  # Если амплитуда больше 10% от максимальной (32768)
                 # Вычисляем коэффициент масштабирования (уменьшаем в 10 раз)
                 scale_factor = 0.1
-                logging.debug(f"Масштабирование входного сигнала: амплитуда {max_amplitude}, коэффициент {scale_factor}")
+                logging.info(f"Масштабирование входного сигнала: амплитуда {max_amplitude}, коэффициент {scale_factor}")
                 
                 # Масштабируем сигнал
                 scaled_array = (input_array * scale_factor).astype(np.int16)
                 frame_bytes = scaled_array.tobytes()
             elif max_amplitude > 3276 and not self.scaling_enabled:
-                logging.debug(f"Обнаружена высокая амплитуда входного сигнала ({max_amplitude}), но масштабирование ВЫКЛЮЧЕНО")
+                logging.info(f"Обнаружена высокая амплитуда входного сигнала ({max_amplitude}), но масштабирование ВЫКЛЮЧЕНО")
             
             if self.batch_mode:
                 # В пакетном режиме сначала обрабатываем все референсные фреймы
@@ -346,7 +346,7 @@ class WebRTCAECSession:
                                 chunk = frame_bytes[i:i+expected_size]
                                 chunk_samples = len(chunk) // (2 * self.channels)
                                 chunk_ms = chunk_samples / self.sample_rate * 1000
-                                logging.debug(f"Обработка части входного фрейма: {chunk_samples} сэмплов, {len(chunk)} байт, {chunk_ms:.2f} мс")
+                                logging.info(f"Обработка части входного фрейма: {chunk_samples} сэмплов, {len(chunk)} байт, {chunk_ms:.2f} мс")
                                 
                                 # Используем process_stream из audio_processing.h
                                 processed_chunk = self.apm.process_stream(chunk)
@@ -359,7 +359,7 @@ class WebRTCAECSession:
                         # Если фрейм слишком маленький, дополняем его нулями
                         padding_size = expected_size - frame_size_bytes
                         padded_frame = frame_bytes + b'\x00' * padding_size
-                        logging.debug(f"Входной фрейм дополнен нулями до {expected_size} байт, {self.frame_size_ms} мс")
+                        logging.info(f"Входной фрейм дополнен нулями до {expected_size} байт, {self.frame_size_ms} мс")
                         
                         # Используем process_stream из audio_processing.h
                         processed_padded = self.apm.process_stream(padded_frame)
@@ -368,7 +368,7 @@ class WebRTCAECSession:
                         processed_bytes = processed_padded[:frame_size_bytes]
                 else:
                     # Если размер фрейма соответствует ожидаемому, обрабатываем его напрямую
-                    logging.debug(f"Обработка входного фрейма стандартного размера: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
+                    logging.info(f"Обработка входного фрейма стандартного размера: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
                     
                     # Используем process_stream из audio_processing.h
                     processed_bytes = self.apm.process_stream(frame_bytes)
@@ -386,7 +386,7 @@ class WebRTCAECSession:
                     # Если обнаружено эхо, увеличиваем счетчик
                     if has_echo:
                         self.stats["echo_frames"] += 1
-                        logging.debug(f"Обнаружено эхо во входном фрейме {self.stats['processed_frames']}")
+                        logging.info(f"Обнаружено эхо во входном фрейме {self.stats['processed_frames']}")
                 except Exception as e:
                     logging.error(f"Ошибка при проверке наличия эха: {e}")
             
@@ -436,7 +436,7 @@ class WebRTCAECSession:
                         chunk_ms = len(ref_chunk) / self.sample_rate * 1000
                         
                         if ref_idx == 0 and i == 0:  # Логируем только первый чанк для уменьшения объема логов
-                            logging.debug(f"Пакетный режим: референсный чанк {ref_idx+1}/{len(self.reference_frames)}, позиция {i}: {len(ref_chunk)} сэмплов, {len(chunk_bytes)} байт, {chunk_ms:.2f} мс")
+                            logging.info(f"Пакетный режим: референсный чанк {ref_idx+1}/{len(self.reference_frames)}, позиция {i}: {len(ref_chunk)} сэмплов, {len(chunk_bytes)} байт, {chunk_ms:.2f} мс")
                         
                         # Обрабатываем референсный поток
                         self.apm.process_reverse_stream(chunk_bytes)
@@ -644,13 +644,13 @@ class WebRTCAECSession:
             # Проверяем, что длина массивов четная для стерео данных
             if len(ref_signal) % 2 == 0:
                 ref_signal = ref_signal.reshape(-1, 2)[:, 0]  # Берем только левый канал
-                logging.debug(f"Стерео референсный сигнал преобразован в моно: {len(ref_signal)} сэмплов")
+                logging.info(f"Стерео референсный сигнал преобразован в моно: {len(ref_signal)} сэмплов")
             else:
                 logging.warning(f"Нечетное количество элементов ({len(ref_signal)}) в стерео референсном сигнале, используем как есть")
                 
             if len(in_signal) % 2 == 0:
                 in_signal = in_signal.reshape(-1, 2)[:, 0]  # Берем только левый канал
-                logging.debug(f"Стерео входной сигнал преобразован в моно: {len(in_signal)} сэмплов")
+                logging.info(f"Стерео входной сигнал преобразован в моно: {len(in_signal)} сэмплов")
             else:
                 logging.warning(f"Нечетное количество элементов ({len(in_signal)}) в стерео входном сигнале, используем как есть")
         
@@ -716,7 +716,7 @@ class WebRTCAECSession:
         
         return delay_samples, delay_ms, confidence
 
-    def auto_set_delay(self, reference_data: bytes, input_data: bytes, max_delay_ms: int = 1000) -> Tuple[int, float, float]:
+    def auto_set_delay(self, reference_data: bytes, input_data: bytes, max_delay_ms: int = 1000, actual_delay_ms: int = None) -> Tuple[int, float, float]:
         """
         Автоматически оценивает и устанавливает задержку между референсным и входным сигналами
         
@@ -728,45 +728,59 @@ class WebRTCAECSession:
         Returns:
             Tuple[int, float, float]: (задержка в сэмплах, задержка в мс, уверенность в оценке)
         """
-        # Получаем данные корреляции напрямую, чтобы сохранить их для последующего использования
-        ref_signal_norm, in_signal_norm, correlation, lags = self.get_delay_correlation_data(
-            reference_data, input_data, self.sample_rate, self.channels, max_delay_ms
-        )
-        
-        # Вычисляем максимальную задержку в сэмплах
-        max_delay_samples = int(max_delay_ms * self.sample_rate / 1000)
-        
-        # Находим индекс максимальной корреляции
-        max_index = np.argmax(correlation)
-        
-        # Вычисляем задержку (учитываем, что correlate возвращает сдвиг)
-        delay_samples = lags[max_index]
-        
-        # Ограничиваем задержку
-        delay_samples = max(0, min(delay_samples, max_delay_samples))
-        
-        # Вычисляем задержку в мс
-        delay_ms = delay_samples * 1000 / self.sample_rate
-        
-        # Вычисляем уверенность в оценке (нормализованное значение максимума корреляции)
-        max_correlation = correlation[max_index]
-        confidence = max_correlation / (np.std(ref_signal_norm) * np.std(in_signal_norm) * len(ref_signal_norm))
-        confidence = min(1.0, max(0.0, confidence))
-        
-        logging.info(f"Оценка задержки: {delay_samples} сэмплов ({delay_ms:.2f} мс), уверенность: {confidence:.2f}")
-        
+        if actual_delay_ms is not None:
+            logging.info(f"Установка задержки вручную: {actual_delay_ms} мс")
+            self.set_system_delay(int(actual_delay_ms * self.sample_rate / 1000))
+            delay_samples = int(actual_delay_ms * self.sample_rate / 1000)
+            delay_ms = actual_delay_ms
+            confidence = 1.0
+
+            # Сохраняем данные корреляции для последующего использования
+            self._last_correlation_data = {
+                'delay_samples': delay_samples,
+                'delay_ms': delay_ms,
+                'confidence': confidence
+            }
+        else:
+            # Получаем данные корреляции напрямую, чтобы сохранить их для последующего использования
+            ref_signal_norm, in_signal_norm, correlation, lags = self.get_delay_correlation_data(
+                reference_data, input_data, self.sample_rate, self.channels, max_delay_ms
+            )
+            
+            # Вычисляем максимальную задержку в сэмплах
+            max_delay_samples = int(max_delay_ms * self.sample_rate / 1000)
+            
+            # Находим индекс максимальной корреляции
+            max_index = np.argmax(correlation)
+            
+            # Вычисляем задержку (учитываем, что correlate возвращает сдвиг)
+            delay_samples = lags[max_index]
+            
+            # Ограничиваем задержку
+            delay_samples = max(0, min(delay_samples, max_delay_samples))
+            
+            # Вычисляем задержку в мс
+            delay_ms = delay_samples * 1000 / self.sample_rate
+            
+            # Вычисляем уверенность в оценке (нормализованное значение максимума корреляции)
+            max_correlation = correlation[max_index]
+            confidence = max_correlation / (np.std(ref_signal_norm) * np.std(in_signal_norm) * len(ref_signal_norm))
+            confidence = min(1.0, max(0.0, confidence))
+
+            # Сохраняем данные корреляции для последующего использования
+            self._last_correlation_data = {
+                'correlation': correlation,
+                'lags': lags,
+                'delay_samples': delay_samples,
+                'delay_ms': delay_ms,
+                'confidence': confidence
+            }
+
+            logging.info(f"Оценка задержки: {delay_samples} сэмплов ({delay_ms:.2f} мс), уверенность: {confidence:.2f}")
+
         # Устанавливаем задержку в AEC
         self.set_system_delay(delay_samples)
-        
-        # Сохраняем данные корреляции для последующего использования
-        self._last_correlation_data = {
-            'correlation': correlation,
-            'lags': lags,
-            'delay_samples': delay_samples,
-            'delay_ms': delay_ms,
-            'confidence': confidence
-        }
-        
+
         return delay_samples, delay_ms, confidence
 
     def get_last_correlation_data(self) -> Dict[str, Any]:

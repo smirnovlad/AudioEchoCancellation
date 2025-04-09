@@ -47,7 +47,7 @@ def plot_reference_signals(
     plt_figure,
     subplot_position,
     ref_channel,
-    ref_delayed_channel,
+    ref_by_micro_volumed_delayed_channel,
     sample_rate,
     ref_delay_ms=None
 ):
@@ -58,7 +58,7 @@ def plot_reference_signals(
         plt_figure: Объект figure из matplotlib
         subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
         ref_array: Массив с исходным референсным сигналом
-        ref_delayed_array: Массив с задержанным референсным сигналом
+        ref_by_micro_volumed_delayed_array: Массив с задержанным референсным сигналом
         sample_rate: Частота дискретизации
         ref_delay_ms: Задержка в мс между сигналами (если известна)
     """
@@ -72,29 +72,29 @@ def plot_reference_signals(
     padded_ref[:len(ref_channel)] = ref_channel
     
     padded_ref_delayed = np.zeros(display_samples)
-    padded_ref_delayed[:len(ref_delayed_channel)] = ref_delayed_channel
+    padded_ref_delayed[:len(ref_by_micro_volumed_delayed_channel)] = ref_by_micro_volumed_delayed_channel
     
     # Используем дополненные массивы
     ref_channel = padded_ref
-    ref_delayed_channel = padded_ref_delayed
+    ref_by_micro_volumed_delayed_channel = padded_ref_delayed
     
     logging.info(f"Референсные сигналы дополнены нулями до 8000 мс ({display_samples} семплов)")
     logging.info(f"Исходная длина ref_channel: {len(ref_channel)} семплов")
-    logging.info(f"Исходная длина ref_delayed_channel: {len(ref_delayed_channel)} семплов")
+    logging.info(f"Исходная длина ref_by_micro_volumed_delayed_channel: {len(ref_by_micro_volumed_delayed_channel)} семплов")
     
     # Создаем расширенную временную ось для отображения
     display_time_ms = np.arange(display_samples) * 1000 / sample_rate
     
     # Строим графики используя подготовленные массивы с одинаковой длиной
-    plt_figure.plot(display_time_ms, ref_channel, label=f'Исходный референс', alpha=0.7, color='blue')
-    plt_figure.plot(display_time_ms, ref_delayed_channel, label=f'Задержанный референс', alpha=0.7, color='red')
+    plt_figure.plot(display_time_ms, ref_channel, label=f'Референс на входе в микро', alpha=0.7, color='blue')
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_delayed_channel, label=f'Задержанный референс на входе в микро', alpha=0.7, color='red')
     
     # Если есть задержка, вычисленная по корреляции, отображаем её
     if ref_delay_ms is not None:
         plt_figure.axvline(x=ref_delay_ms, color='g', linestyle='--', 
                   label=f'Вычисленная задержка: {ref_delay_ms:.2f} мс')
     
-    plt_figure.title(f'1. Сравнение референсных сигналов (исходный и задержанный)')
+    plt_figure.title(f'{subplot_position[-1]}. Сравнение референсных сигналов на входе в микро (с задержкой и без)')
     
     # Добавляем более детальные деления на оси X
     plt_figure.xticks(np.arange(0, 8001, 250))  # Деления каждые 250 мс до 8000 мс
@@ -110,7 +110,7 @@ def plot_reference_correlation(
     plt_figure,
     subplot_position,
     ref_channel,
-    ref_delayed_channel,
+    ref_by_micro_volumed_delayed_channel,
     sample_rate
 ):
     """
@@ -120,7 +120,7 @@ def plot_reference_correlation(
         plt_figure: Объект figure из matplotlib
         subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
         ref_array: Массив с исходным референсным сигналом
-        ref_delayed_array: Массив с задержанным референсным сигналом
+        ref_by_micro_volumed_delayed_array: Массив с задержанным референсным сигналом
         sample_rate: Частота дискретизации
     
     Returns:
@@ -130,14 +130,14 @@ def plot_reference_correlation(
 
     # Определяем минимальную длину для корреляции (до 5 секунд)
     correlation_window = int(5 * sample_rate)  # 5 секунд для корреляции
-    actual_correlation_window = min(correlation_window, len(ref_channel), len(ref_delayed_channel))
+    actual_correlation_window = min(correlation_window, len(ref_channel), len(ref_by_micro_volumed_delayed_channel))
 
     # Логируем информацию о корреляционном окне
     logging.info(f"Используем корреляционное окно: {actual_correlation_window} семплов ({actual_correlation_window/sample_rate:.1f} сек)")
 
     # Обрезаем оба сигнала до минимальной длины для корреляции
     ref_for_corr = ref_channel[:actual_correlation_window]
-    ref_delayed_for_corr = ref_delayed_channel[:actual_correlation_window]
+    ref_delayed_for_corr = ref_by_micro_volumed_delayed_channel[:actual_correlation_window]
 
     # Вычисляем корреляцию
     corr = np.correlate(ref_delayed_for_corr, ref_for_corr, 'full')
@@ -150,14 +150,14 @@ def plot_reference_correlation(
     ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
 
     # Логируем информацию о найденной задержке
-    logging.info(f"Корреляция между референсными сигналами: макс.индекс={max_corr_idx}, задержка={ref_delay_samples} сэмплов ({ref_delay_ms:.2f} мс)")
+    logging.info(f"Корреляция между референсными сигналами на входе в микро (с задержкой и без): макс.индекс={max_corr_idx}, задержка={ref_delay_samples} сэмплов ({ref_delay_ms:.2f} мс)")
 
     # Строим график корреляции
     plt_figure.plot(corr_time_ms, corr, color='green')
     plt_figure.axvline(x=ref_delay_ms, color='r', linestyle='--', 
                 label=f'Измеренная задержка: {ref_delay_ms:.2f} мс')
 
-    plt_figure.title(f'2. Кросс-корреляция между референсными сигналами')
+    plt_figure.title(f'{subplot_position[-1]}. Кросс-корреляция между референсными сигналами на входе в микро (с задержкой и без)')
     plt_figure.xlabel('Задержка (мс)')
     plt_figure.ylabel('Корреляция')
     plt_figure.legend()
@@ -169,6 +169,116 @@ def plot_reference_correlation(
     plt_figure.grid(True, which='both', linestyle='--', alpha=0.7)
     
     return ref_delay_ms
+
+def plot_original_and_by_micro_volumed_reference_signals(
+    plt_figure,
+    subplot_position,
+    ref_channel,
+    ref_by_micro_volumed_channel,
+    sample_rate
+):
+    """
+    Отображает график сравнения оригинального референсного сигнала и 
+    референсного сигнала с измененной громкостью на входе в микрофон.
+    
+    Args:
+        plt_figure: Объект figure из matplotlib
+        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
+        ref_channel: Массив с оригинальным референсным сигналом
+        ref_by_micro_volumed_channel: Массив с референсным сигналом измененной громкости
+        sample_rate: Частота дискретизации
+    """
+    plt_figure.subplot(*subplot_position)
+    
+    # Определяем длину для отображения до 8000 мс
+    display_samples = int(8000 * sample_rate / 1000)  # Количество семплов для 8000 мс
+    
+    # Дополняем оба массива нулями до display_samples
+    padded_ref = np.zeros(display_samples)
+    padded_ref[:len(ref_channel)] = ref_channel
+    
+    padded_ref_by_micro_volumed = np.zeros(display_samples)
+    padded_ref_by_micro_volumed[:len(ref_by_micro_volumed_channel)] = ref_by_micro_volumed_channel
+    
+    # Используем дополненные массивы
+    ref_channel = padded_ref
+    ref_by_micro_volumed_channel = padded_ref_by_micro_volumed
+    
+    logging.info(f"Оригинальный и с измененной громкостью референсные сигналы дополнены нулями до 8000 мс ({display_samples} семплов)")
+    
+    # Создаем расширенную временную ось для отображения
+    display_time_ms = np.arange(display_samples) * 1000 / sample_rate
+    
+    # Строим графики используя подготовленные массивы с одинаковой длиной
+    plt_figure.plot(display_time_ms, ref_channel, label=f'Оригинальный референс', alpha=0.7, color='blue')
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_channel, label=f'Референс на входе в микро и другой громкостью', alpha=0.7, color='purple')
+    
+    plt_figure.title(f'{subplot_position[-1]}. Сравнение оригинального и с измененной громкостью референсных сигналов')
+    
+    # Добавляем более детальные деления на оси X
+    plt_figure.xticks(np.arange(0, 8001, 250))  # Деления каждые 250 мс до 8000 мс
+    plt_figure.xlim([0, 8000])  # Фиксированный диапазон до 8000 мс
+    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
+    
+    plt_figure.xlabel('Время (мс)')
+    plt_figure.ylabel('Амплитуда')
+    plt_figure.grid(True)
+    plt_figure.legend()
+
+def plot_original_reference_and_input_signals(
+    plt_figure,
+    subplot_position,
+    ref_by_micro_volumed_delayed_channel,
+    in_channel,
+    sample_rate
+):
+    """
+    Отображает график сравнения задержанного референсного сигнала с измененной 
+    громкостью и входного сигнала микрофона.
+    
+    Args:
+        plt_figure: Объект figure из matplotlib
+        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
+        ref_by_micro_volumed_delayed_channel: Массив с задержанным референсным сигналом
+        in_channel: Массив с входным сигналом микрофона
+        sample_rate: Частота дискретизации
+    """
+    plt_figure.subplot(*subplot_position)
+    
+    # Определяем длину для отображения до 8000 мс
+    display_samples = int(8000 * sample_rate / 1000)  # Количество семплов для 8000 мс
+    
+    # Дополняем оба массива нулями до display_samples
+    padded_ref_delayed = np.zeros(display_samples)
+    padded_ref_delayed[:len(ref_by_micro_volumed_delayed_channel)] = ref_by_micro_volumed_delayed_channel
+    
+    padded_in = np.zeros(display_samples)
+    padded_in[:len(in_channel)] = in_channel
+    
+    # Используем дополненные массивы
+    ref_by_micro_volumed_delayed_channel = padded_ref_delayed
+    in_channel = padded_in
+    
+    logging.info(f"Задержанный референсный и входной сигналы дополнены нулями до 8000 мс ({display_samples} семплов)")
+    
+    # Создаем расширенную временную ось для отображения
+    display_time_ms = np.arange(display_samples) * 1000 / sample_rate
+    
+    # Строим графики используя подготовленные массивы с одинаковой длиной
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_delayed_channel, label=f'Задержанный референс на входе в микро', alpha=0.7, color='red')
+    plt_figure.plot(display_time_ms, in_channel, label=f'Входной сигнал', alpha=0.7, color='green')
+    
+    plt_figure.title(f'{subplot_position[-1]}. Задержанный референсный сигнал в микро и входной сигнал')
+    
+    # Добавляем более детальные деления на оси X
+    plt_figure.xticks(np.arange(0, 8001, 250))  # Деления каждые 250 мс до 8000 мс
+    plt_figure.xlim([0, 8000])  # Фиксированный диапазон до 8000 мс
+    plt_figure.grid(axis='x', which='both', linestyle='--', alpha=0.7)  # Сетка по оси X
+    
+    plt_figure.xlabel('Время (мс)')
+    plt_figure.ylabel('Амплитуда')
+    plt_figure.grid(True)
+    plt_figure.legend()
 
 def plot_input_reference_correlation(
     plt_figure,
@@ -198,7 +308,7 @@ def plot_input_reference_correlation(
     plt_figure.axvline(x=delay_ms, color='r', linestyle='--', 
                 label=f'Измеренная задержка: {delay_ms:.2f} мс, уверенность: {confidence:.2f}')
 
-    plt_figure.title(f'3. Кросс-корреляция между входным и референсным сигналами')
+    plt_figure.title(f'{subplot_position[-1]}. Кросс-корреляция между входным и референсным сигналами')
     plt_figure.xlabel('Задержка (мс)')
     plt_figure.ylabel('Корреляция')
     plt_figure.legend()
@@ -231,7 +341,7 @@ def plot_original_signals(
     plt_figure.subplot(*subplot_position)
     plt_figure.plot(time_axis_ms, ref_channel, label='Референсный', alpha=0.7, color='blue')
     plt_figure.plot(time_axis_ms, in_channel, label='Входной', alpha=0.7, color='green')
-    plt_figure.title(f'4. Оригинальные сигналы (задержка: {delay_ms:.2f} мс)')
+    plt_figure.title(f'{subplot_position[-1]}. Референсный и входной сигналы (задержка: {delay_ms:.2f} мс)')
 
     # Добавляем более детальные деления на оси X
     plt_figure.xticks(np.arange(0, time_axis_ms[-1] + 1, 200))  # Деления каждые 200 мс
@@ -279,7 +389,7 @@ def plot_corrected_signals(
     plt_figure.plot(time_axis_ms, corrected_ref_array, label='Референсный', alpha=0.7, color='blue')
     plt_figure.plot(time_axis_ms, corrected_in_array, label='Входной', alpha=0.7, color='green')
     
-    plt_figure.title(f'5. Сигналы с учётом задержки ({delay_ms:.2f} мс)')
+    plt_figure.title(f'{subplot_position[-1]}. Сигналы с учётом задержки ({delay_ms:.2f} мс)')
     
     # Добавляем более детальные деления на оси X
     plt_figure.xticks(np.arange(0, time_axis_ms[-1] + 1, 200))  # Деления каждые 200 мс
@@ -338,7 +448,7 @@ def plot_processed_signals(
                     xy=(0.02, 0.95), xycoords='axes fraction', 
                     color='black', fontsize=9, alpha=0.8)
     
-    plt_figure.title('6. Сравнение исходного и обработанного сигналов')
+    plt_figure.title(f'{subplot_position[-1]}. Сравнение исходного и обработанного сигналов')
     
     # Добавляем более детальные деления на оси X
     plt_figure.xticks(np.arange(0, time_axis_ms[-1] + 1, 200))  # Деления каждые 200 мс
@@ -550,8 +660,6 @@ def visualize_audio_processing(
     input_file_path: Optional[str] = None,
     processed_data: Optional[bytes] = None,
     processed_file_path: Optional[str] = None,
-    reference_delayed_data: Optional[bytes] = None,
-    reference_delayed_file_path: Optional[str] = None,
     output_prefix: str = "aec",
     sample_rate: int = 16000,
     channels: int = 1,
@@ -607,24 +715,19 @@ def visualize_audio_processing(
             logging.warning(f"Неверное количество каналов ({channels}), используем значение по умолчанию: 1")
             channels = 1
 
-        # Для обратной совместимости
-        if reference_delayed_data is None and reference_by_micro_volumed_delayed_data is not None:
-            reference_delayed_data = reference_by_micro_volumed_delayed_data
-        if reference_delayed_file_path is None and reference_by_micro_volumed_delayed_file_path is not None:
-            reference_delayed_file_path = reference_by_micro_volumed_delayed_file_path
-
         # Логируем информацию о файлах
-        ref_vol_file_info, _ = log_file_info(reference_by_micro_volumed_file_path, "Референсный файл с измененной громкостью")
+        ref_file_info, _ = log_file_info(reference_file_path, "Оригинальное референсное аудио")
+        ref_by_micro_volumed_file_info, _ = log_file_info(reference_by_micro_volumed_file_path, "Референсное аудио на входе в микро с измененной громкостью")
+        ref_by_micro_volumed_delayed_file_info, _ = log_file_info(reference_by_micro_volumed_delayed_file_path, "Референсное аудио на входе в микро с измененной громкостью и задержкой")
         input_file_info, _ = log_file_info(input_file_path, "Входной файл")
-        ref_delayed_file_info, _ = log_file_info(reference_by_micro_volumed_delayed_file_path, "Задержанный референсный файл")
         processed_file_info, _ = log_file_info(processed_file_path, "Обработанный файл")
 
-        if ref_delayed_file_info:
-            ref_delayed_duration_ms = ref_delayed_file_info['duration_ms']
+        if ref_by_micro_volumed_delayed_file_info:
+            ref_by_micro_volumed_delayed_duration_ms = ref_by_micro_volumed_delayed_file_info['duration_ms']
             
             # Вычисляем разницу в длительности между референсным и задержанным референсным файлами
-            if 'reference' in ref_delayed_file_info:
-                duration_diff_ms = ref_delayed_file_info['duration_ms'] - ref_delayed_file_info['reference']['duration_ms']
+            if 'reference' in ref_by_micro_volumed_delayed_file_info:
+                duration_diff_ms = ref_by_micro_volumed_delayed_file_info['duration_ms'] - ref_by_micro_volumed_delayed_file_info['reference']['duration_ms']
                 logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {duration_diff_ms:.2f} мс")
 
         # Логируем размеры данных
@@ -634,41 +737,53 @@ def visualize_audio_processing(
             logging.info(f"  Размер input_data: {len(input_data)} байт")
         
         # Передаем количество каналов в функцию bytes_to_numpy
-        ref_vol_array = bytes_to_numpy(reference_by_micro_volumed_data, sample_rate, channels)
-        ref_delayed_array = bytes_to_numpy(reference_delayed_data, sample_rate, channels)
+        ref_array = bytes_to_numpy(reference_data, sample_rate, channels)
+        ref_by_micro_volumed_array = bytes_to_numpy(reference_by_micro_volumed_data, sample_rate, channels)
+        ref_by_micro_volumed_delayed_array = bytes_to_numpy(reference_by_micro_volumed_delayed_data, sample_rate, channels)
         in_array = bytes_to_numpy(input_data, sample_rate, channels)
         processed_array = bytes_to_numpy(processed_data, sample_rate, channels)
         
         # Логируем подробную информацию о массивах
-        logging.info(format_array_info("Референсный массив с измененной громкостью (ref_vol_array)", ref_vol_array, sample_rate))
-        logging.info(format_array_info("Задержанный референсный массив (ref_delayed_array)", ref_delayed_array, sample_rate))
+        logging.info(format_array_info("Референсный массив с измененной громкостью (ref_by_micro_volumed_array)", ref_by_micro_volumed_array, sample_rate))
+        logging.info(format_array_info("Задержанный референсный массив (ref_by_micro_volumed_delayed_array)", ref_by_micro_volumed_delayed_array, sample_rate))
         logging.info(format_array_info("Входной массив (in_array)", in_array, sample_rate))
         logging.info(format_array_info("Обработанный массив (processed_array)", processed_array, sample_rate))
         
         # Вычисляем длительность в зависимости от формата данных
-        if len(ref_vol_array.shape) > 1:  # Стерео
-            ref_duration = ref_vol_array.shape[0] / sample_rate
+        if len(ref_by_micro_volumed_array.shape) > 1:  # Стерео
+            ref_by_micro_volumed_duration = ref_by_micro_volumed_array.shape[0] / sample_rate
         else:  # Моно
-            ref_duration = len(ref_vol_array) / sample_rate
-            
+            ref_by_micro_volumed_duration = len(ref_by_micro_volumed_array) / sample_rate
+
+        if len(ref_by_micro_volumed_delayed_array.shape) > 1:  # Стерео
+            ref_by_micro_volumed_delayed_duration = ref_by_micro_volumed_delayed_array.shape[0] / sample_rate
+        else:  # Моно
+            ref_by_micro_volumed_delayed_duration = len(ref_by_micro_volumed_delayed_array) / sample_rate
+
         if len(in_array.shape) > 1:  # Стерео
             in_duration = in_array.shape[0] / sample_rate
         else:  # Моно
             in_duration = len(in_array) / sample_rate
             
-        logging.info(f"  Длительность ref_vol: {ref_duration:.3f} сек")
+        logging.info(f"  Длительность ref_vol: {ref_by_micro_volumed_duration:.3f} сек")
         logging.info(f"  Длительность in: {in_duration:.3f} сек")
+        logging.info(f"  Длительность ref_vol_delayed: {ref_by_micro_volumed_delayed_duration:.3f} сек")
 
         # Для каждого массива определяем одноканальную версию для отображения
-        if len(ref_vol_array.shape) > 1:
-            ref_channel = ref_vol_array[:, 0]  # Берем первый канал для отображения
+        if len(ref_array.shape) > 1:
+            ref_channel = ref_array[:, 0]  # Берем первый канал для отображения
         else:
-            ref_channel = ref_vol_array
+            ref_channel = ref_array
 
-        if len(ref_delayed_array.shape) > 1:
-            ref_delayed_channel = ref_delayed_array[:, 0]
+        if len(ref_by_micro_volumed_array.shape) > 1:
+            ref_by_micro_volumed_channel = ref_by_micro_volumed_array[:, 0]  # Берем первый канал для отображения
         else:
-            ref_delayed_channel = ref_delayed_array
+            ref_by_micro_volumed_channel = ref_by_micro_volumed_array
+
+        if len(ref_by_micro_volumed_delayed_array.shape) > 1:
+            ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_array[:, 0]
+        else:
+            ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_array
 
         if len(in_array.shape) > 1:
             in_channel = in_array[:, 0]  # Берем первый канал для отображения
@@ -690,22 +805,22 @@ def visualize_audio_processing(
             logging.info(f"Корреляция была рассчитана внутри функции визуализации")
         
         # Вычисляем длительность сигналов в миллисекундах
-        ref_vol_duration_ms = len(ref_vol_array) * 1000 / sample_rate
-        if ref_vol_file_info:
-            assert ref_vol_duration_ms == ref_vol_file_info['duration_ms']
+        ref_by_micro_volumed_duration_ms = len(ref_by_micro_volumed_array) * 1000 / sample_rate
+        if ref_by_micro_volumed_file_info:
+            assert ref_by_micro_volumed_duration_ms == ref_by_micro_volumed_file_info['duration_ms']
 
         in_duration_ms = len(in_array) * 1000 / sample_rate
         if input_file_info:
             assert in_duration_ms == input_file_info['duration_ms']
 
-        ref_delayed_duration_ms = len(ref_delayed_array) * 1000 / sample_rate
-        if ref_delayed_file_info:
-            assert ref_delayed_duration_ms == ref_delayed_file_info['duration_ms']
+        ref_by_micro_volumed_delayed_duration_ms = len(ref_by_micro_volumed_delayed_array) * 1000 / sample_rate
+        if ref_by_micro_volumed_delayed_file_info:
+            assert ref_by_micro_volumed_delayed_duration_ms == ref_by_micro_volumed_delayed_file_info['duration_ms']
 
         # Логируем информацию о длительности
-        logging.info(f"Длительность reference_by_micro_volumed.wav: {ref_vol_duration_ms:.2f} мс")
+        logging.info(f"Длительность reference_by_micro_volumed.wav: {ref_by_micro_volumed_duration_ms:.2f} мс")
         logging.info(f"Длительность original_input.wav: {in_duration_ms:.2f} мс")
-        logging.info(f"Длительность reference_by_micro_volumed_delayed.wav: {ref_delayed_duration_ms:.2f} мс")
+        logging.info(f"Длительность reference_by_micro_volumed_delayed.wav: {ref_by_micro_volumed_delayed_duration_ms:.2f} мс")
 
         processed_array = bytes_to_numpy(processed_data, sample_rate, channels)
         if len(processed_array.shape) > 1:
@@ -727,17 +842,17 @@ def visualize_audio_processing(
         time_axis_ms = time_axis * 1000  # Преобразуем секунды в миллисекунды
         
         # Определяем количество графиков
-        num_plots = 6  # Только 6 графиков
+        num_plots = 9  # Только 8 графиков
         
         # Создаем график
         plt.figure(figsize=(12, 4 * num_plots))
         
-        # 1. График двух референсных сигналов (до и после задержки)
+        # 1. График двух референсных сигналов на входе в микро (до и после задержки)
         plot_reference_signals(
             plt,
             (num_plots, 1, 1),
-            ref_channel,
-            ref_delayed_channel,
+            ref_by_micro_volumed_channel,
+            ref_by_micro_volumed_delayed_channel,
             sample_rate,
             ref_delay_ms if 'ref_delay_ms' in locals() else None
         )
@@ -746,15 +861,52 @@ def visualize_audio_processing(
         ref_delay_ms = plot_reference_correlation(
             plt,
             (num_plots, 1, 2),
-            ref_channel,
-            ref_delayed_channel,
+            ref_by_micro_volumed_channel,
+            ref_by_micro_volumed_delayed_channel,
             sample_rate
         )
-        
-        # 3. Кросс-корреляция между входным и референсным сигналами
-        plot_input_reference_correlation(
+
+        # График оригинального и на входе в микро референсных сигналов
+        plot_original_and_by_micro_volumed_reference_signals(
             plt,
             (num_plots, 1, 3),
+            ref_channel,
+            ref_by_micro_volumed_channel,
+            sample_rate,
+        )
+
+        # График оригинального и на входе в микро референсных сигналов
+        plot_original_and_by_micro_volumed_reference_correlation(
+            plt,
+            (num_plots, 1, 4),
+            ref_channel,
+            ref_by_micro_volumed_channel,
+            sample_rate,
+        )
+        
+        # График оригинального референсного и входного сигналов
+        plot_original_reference_and_input_signals(
+            plt,
+            (num_plots, 1, 5),
+            ref_by_micro_volumed_delayed_channel,
+            in_channel,
+            sample_rate,
+        )
+
+        # 6. Исходные сигналы с указанием задержки
+        plot_original_signals(
+            plt,
+            (num_plots, 1, 6),
+            ref_channel,
+            in_channel,
+            time_axis_ms,
+            delay_ms
+        )
+
+        # 7. Кросс-корреляция между входным и референсным сигналами
+        plot_input_reference_correlation(
+            plt,
+            (num_plots, 1, 7),
             lags,
             correlation,
             delay_ms,
@@ -762,20 +914,10 @@ def visualize_audio_processing(
             sample_rate
         )
 
-        # 4. Исходные сигналы с указанием задержки
-        plot_original_signals(
-            plt,
-            (num_plots, 1, 4),
-            ref_channel,
-            in_channel,
-            time_axis_ms,
-            delay_ms
-        )
-
-        # 5. Сигналы после корректировки задержки
+        # 8. Сигналы после корректировки задержки
         plot_corrected_signals(
             plt,
-            (num_plots, 1, 5),
+            (num_plots, 1, 8),
             ref_channel,
             in_channel,
             time_axis_ms,
@@ -783,10 +925,10 @@ def visualize_audio_processing(
             delay_ms
         )
 
-        # 6. Сравнение исходного и обработанного сигналов
+        # 9. Сравнение исходного и обработанного сигналов
         plot_processed_signals(
             plt,
-            (num_plots, 1, 6),
+            (num_plots, 1, 9),
             in_channel,
             processed_channel,
             time_axis_ms,
@@ -803,7 +945,7 @@ def visualize_audio_processing(
         # Вычисляем и логируем статистику
         results = calculate_and_log_statistics(
             in_array,
-            ref_vol_array,  # Используем ref_vol_array вместо ref_array
+            ref_by_micro_volumed_array,  # Используем ref_by_micro_volumed_array вместо ref_array
             processed_array, 
             processed_data,
             delay_ms,
@@ -863,3 +1005,60 @@ def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
     except Exception as e:
         logging.error(f"Ошибка при преобразовании байтов в numpy массив: {e}")
         return None
+
+def plot_original_and_by_micro_volumed_reference_correlation(
+    plt_figure,
+    subplot_position,
+    ref_channel,
+    ref_by_micro_volumed_channel,
+    sample_rate
+):
+    """
+    Отображает график кросс-корреляции между оригинальным и изменённым референсными сигналами.
+    
+    Args:
+        plt_figure: Объект figure из matplotlib
+        subplot_position: Позиция для subplot (tuple из трех чисел: rows, cols, index)
+        ref_channel: Массив с оригинальным референсным сигналом
+        ref_by_micro_volumed_channel: Массив с референсным сигналом измененной громкости
+        sample_rate: Частота дискретизации
+    
+    Returns:
+        float: Вычисленная задержка в миллисекундах
+    """
+    plt_figure.subplot(*subplot_position)
+
+    # Определяем минимальную длину для корреляции (до 5 секунд)
+    correlation_window = int(5 * sample_rate)
+    actual_correlation_window = min(correlation_window, len(ref_channel), len(ref_by_micro_volumed_channel))
+
+    # Обрезаем оба сигнала до минимальной длины для корреляции
+    ref_for_corr = ref_channel[:actual_correlation_window]
+    ref_by_micro_for_corr = ref_by_micro_volumed_channel[:actual_correlation_window]
+
+    # Вычисляем корреляцию
+    corr = np.correlate(ref_by_micro_for_corr, ref_for_corr, 'full')
+    corr_time = np.arange(len(corr)) - (len(ref_for_corr) - 1)
+    corr_time_ms = corr_time * 1000.0 / sample_rate
+
+    # Находим максимальное значение корреляции и соответствующую задержку
+    max_corr_idx = np.argmax(corr)
+    ref_delay_samples = corr_time[max_corr_idx]
+    ref_delay_ms = ref_delay_samples * 1000.0 / sample_rate
+
+    # Строим график корреляции
+    plt_figure.plot(corr_time_ms, corr, color='blue')
+    plt_figure.axvline(x=ref_delay_ms, color='r', linestyle='--', 
+                label=f'Измеренная задержка: {ref_delay_ms:.2f} мс')
+
+    plt_figure.title(f'{subplot_position[-1]}. Кросс-корреляция между референсным сигналом и референсным сигналом на входе в микро')
+    plt_figure.xlabel('Задержка (мс)')
+    plt_figure.ylabel('Корреляция')
+    plt_figure.legend()
+
+    # Устанавливаем диапазон по X
+    plt_figure.xlim([-100, 1500])
+    plt_figure.xticks(np.arange(-100, 1501, 250))
+    plt_figure.grid(True, which='both', linestyle='--', alpha=0.7)
+    
+    return ref_delay_ms

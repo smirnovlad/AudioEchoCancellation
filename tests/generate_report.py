@@ -60,7 +60,7 @@ def load_test_results(test_dir: str) -> Dict[str, Any]:
         dict: Словарь с результатами тестов
     """
     # Путь к файлу summary_results.json
-    summary_file = os.path.join(test_dir, "summary_results.json")
+    summary_file = os.path.join(test_dir, "aec_test_results.json")
     
     # Проверяем существование файла
     if not os.path.exists(summary_file):
