@@ -195,8 +195,24 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         channels = in_channels
         logging.info(f"Используем количество каналов: {channels}")
         
-        # Попытка чтения задержанного референсного файла (reference_volumed_delayed.wav)
-        reference_delayed_file = reference_file.replace("reference_volumed.wav", "reference_volumed_delayed.wav")
+        # Попытка чтения файла reference_by_micro_volumed.wav
+        ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
+        ref_vol_data = None
+        
+        if os.path.exists(ref_vol_file):
+            try:
+                with wave.open(ref_vol_file, 'rb') as ref_vol_wf:
+                    ref_vol_data = ref_vol_wf.readframes(ref_vol_wf.getnframes())
+                    ref_vol_frames_count = ref_vol_wf.getnframes()
+                    ref_vol_rate = ref_vol_wf.getframerate()
+                    ref_vol_duration_ms = ref_vol_frames_count * 1000 / ref_vol_rate
+                    logging.info(f"Референсный файл с измененной громкостью: длительность {ref_vol_duration_ms:.2f} мс ({ref_vol_duration_ms/1000:.2f} с), {ref_vol_rate} Гц")
+            except Exception as e:
+                logging.warning(f"Не удалось прочитать файл reference_by_micro_volumed.wav: {e}")
+                ref_vol_data = None
+        
+        # Попытка чтения задержанного референсного файла (reference_by_micro_volumed_delayed.wav)
+        reference_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed_delayed.wav")
         ref_delayed_data = None
         
         if os.path.exists(reference_delayed_file):
@@ -358,17 +374,17 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                 # Проверяем основные файлы
                 logging.info(f"Используемая частота дискретизации для визуализации: {sample_rate} Гц")
                 
-                # Проверяем reference_volumed.wav
-                ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_volumed.wav")
+                # Проверяем reference_by_micro_volumed.wav
+                ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
                 if os.path.exists(ref_vol_file):
                     with wave.open(ref_vol_file, 'rb') as wf:
-                        logging.info(f"reference_volumed.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
+                        logging.info(f"reference_by_micro_volumed.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
                 
-                # Проверяем reference_volumed_delayed.wav
-                ref_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_volumed_delayed.wav")
+                # Проверяем reference_by_micro_volumed_delayed.wav
+                ref_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed_delayed.wav")
                 if os.path.exists(ref_delayed_file):
                     with wave.open(ref_delayed_file, 'rb') as wf:
-                        logging.info(f"reference_volumed_delayed.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
+                        logging.info(f"reference_by_micro_volumed_delayed.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
                 
                 # Проверяем original_input.wav
                 orig_input_file = os.path.join(os.path.dirname(input_file), "original_input.wav")
@@ -387,6 +403,10 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                     output_dir=output_dir,
                     reference_data=ref_data,
                     reference_file_path=reference_file,
+                    reference_by_micro_volumed_data=ref_vol_data,
+                    reference_by_micro_volumed_file_path=ref_vol_file,
+                    reference_by_micro_volumed_delayed_data=ref_delayed_data,
+                    reference_by_micro_volumed_delayed_file_path=reference_delayed_file,
                     input_data=in_data,
                     input_file_path=input_file,
                     processed_data=processed_data,
@@ -452,7 +472,7 @@ def process_test_directory(dir_path, output_dir=None, frame_size_ms=10.0, visual
     logging.info(f"Результаты будут сохранены в: {output_dir}")
     
     # Проверяем наличие необходимых файлов
-    reference_file = os.path.join(dir_path, "reference_volumed.wav")
+    reference_file = os.path.join(dir_path, "reference.wav")
     input_file = os.path.join(dir_path, "original_input.wav")
     
     if not os.path.exists(reference_file):
@@ -647,9 +667,9 @@ def process_single_directory(test_dir, args):
     """
     try:
         # Проверяем наличие необходимых файлов
-        reference_file = os.path.join(test_dir, "reference_volumed.wav")
+        reference_file = os.path.join(test_dir, "reference.wav")
         input_file = os.path.join(test_dir, "original_input.wav")
-        reference_delayed_file = os.path.join(test_dir, "reference_volumed_delayed.wav")
+        reference_delayed_file = os.path.join(test_dir, "reference_by_micro_volumed_delayed.wav")
         
         if not os.path.exists(reference_file):
             logging.warning(f"Файл {reference_file} не найден, пропускаем директорию")
@@ -764,7 +784,7 @@ def process_directory_by_level(dir_path, args):
         logging.warning("Попытка обработать как обычную тестовую директорию")
         
         # Проверяем наличие необходимых файлов
-        reference_file = os.path.join(dir_path, "reference_volumed.wav")
+        reference_file = os.path.join(dir_path, "reference.wav")
         input_file = os.path.join(dir_path, "original_input.wav")
         
         if os.path.exists(reference_file) and os.path.exists(input_file):
@@ -783,7 +803,7 @@ def process_directory_by_level(dir_path, args):
                 item_path = os.path.join(dir_path, item)
                 if os.path.isdir(item_path):
                     # Проверяем наличие файлов в поддиректории
-                    ref_file = os.path.join(item_path, "reference_volumed.wav")
+                    ref_file = os.path.join(item_path, "reference.wav")
                     in_file = os.path.join(item_path, "original_input.wav")
                     if os.path.exists(ref_file) and os.path.exists(in_file):
                         logging.info(f"Найдены необходимые файлы в поддиректории {item_path}, обрабатываем")

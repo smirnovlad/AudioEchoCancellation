@@ -38,16 +38,17 @@ delay_100/
 └── volume_13/          # 130% громкости
 
 В каждой поддиректории создаются следующие файлы:
-1. reference_volumed.wav - референсный сигнал с измененной громкостью (без задержки)
-2. reference_volumed_delayed.wav - референсный сигнал с измененной громкостью и добавленной задержкой
+1. reference.wav - оригинальный референсный сигнал без изменений
+2. reference_by_micro_volumed.wav - референсный сигнал с измененной громкостью (без задержки)
+3. reference_by_micro_volumed_delayed.wav - референсный сигнал с измененной громкостью и добавленной задержкой
    (соответствует сигналу, который использовался для микширования с голосом пользователя)
-3. original_input.wav - микшированный сигнал, содержащий микс голоса пользователя и
+4. original_input.wav - микшированный сигнал, содержащий микс голоса пользователя и
    соответствующего референсного сигнала с примененным коэффициентом громкости 
    и задержкой (если указана)
-4. my_voice.wav - чистый голос пользователя без примесей, для сравнения
+5. my_voice.wav - чистый голос пользователя без примесей, для сравнения
 
 ВАЖНО: Скрипт ожидает наличия следующих файлов в обрабатываемой директории:
-- clear_reference.wav - чистый референсный сигнал
+- reference.wav - чистый референсный сигнал
 - reference_by_micro.wav - запись референса через микрофон
 - my_voice.wav или my_voice.mp3 - запись голоса пользователя
 
@@ -56,8 +57,8 @@ delay_100/
 2. Загружает оба референсных файла и файл с голосом пользователя
 3. Для каждой задержки (только для reference_by_micro) создает поддиректории
 4. Для каждого уровня громкости создает директории в соответствующей структуре
-5. В каждой директории создает файлы reference_volumed.wav, reference_volumed_delayed.wav, original_input.wav и my_voice.wav
-   с заданными параметрами
+5. В каждой директории создает файлы reference.wav, reference_by_micro_volumed.wav, 
+   reference_by_micro_volumed_delayed.wav, original_input.wav и my_voice.wav с заданными параметрами
 """
 
 # Задержки в миллисекундах
@@ -387,7 +388,7 @@ def process_directory(directory_path):
     Обрабатывает директорию с аудиофайлами и создает структуру для тестирования.
     
     Структура исходной директории должна содержать:
-    - clear_reference.wav
+    - reference.wav
     - reference_by_micro.wav
     - my_voice.wav или my_voice.mp3
     
@@ -423,7 +424,7 @@ def process_directory(directory_path):
       - ...
     """
     # Проверяем наличие необходимых файлов в директории
-    clear_reference_file = os.path.join(directory_path, "clear_reference.wav")
+    clear_reference_file = os.path.join(directory_path, "reference.wav")
     reference_by_micro_file = os.path.join(directory_path, "reference_by_micro.wav")
     my_voice_file = os.path.join(directory_path, "my_voice.wav")
     my_voice_mp3 = os.path.join(directory_path, "my_voice.mp3")
@@ -723,6 +724,9 @@ def process_clear_reference(clear_reference_data, clear_reference_sr, my_voice_d
     clear_reference_dir = os.path.join(output_dir, "clear_reference")
     os.makedirs(clear_reference_dir, exist_ok=True)
     
+    # Путь к оригинальному reference.wav
+    reference_file = os.path.join(output_dir, "reference.wav")
+    
     # Обрабатываем каждый уровень громкости
     for vol_name, vol_level in volume_levels.items():
         logging.info(f"  Обработка уровня громкости {vol_name}: {vol_level}")
@@ -745,12 +749,18 @@ def process_clear_reference(clear_reference_data, clear_reference_sr, my_voice_d
         # Сохраняем оригинальный голос пользователя для сравнения
         sf.write(os.path.join(vol_dir, "my_voice.wav"), my_voice_data, my_voice_sr)
         
-        # Сохраняем сигнал с измененной громкостью как reference_volumed.wav
-        sf.write(os.path.join(vol_dir, "reference_volumed.wav"), clear_adjusted_data, clear_reference_sr)
+        # Сохраняем сигнал с измененной громкостью как reference_by_micro_volumed.wav
+        sf.write(os.path.join(vol_dir, "reference_by_micro_volumed.wav"), clear_adjusted_data, clear_reference_sr)
         
-        # Сохраняем также копию как reference_volumed_delayed 
-        # (для clear_reference задержка не применяется, поэтому это тот же файл, что и reference_volumed.wav)
-        sf.write(os.path.join(vol_dir, "reference_volumed_delayed.wav"), clear_adjusted_data, clear_reference_sr)
+        # Сохраняем также копию как reference_by_micro_volumed_delayed 
+        # (для clear_reference задержка не применяется, поэтому это тот же файл, что и reference_by_micro_volumed.wav)
+        sf.write(os.path.join(vol_dir, "reference_by_micro_volumed_delayed.wav"), clear_adjusted_data, clear_reference_sr)
+        
+        # Копируем оригинальный reference.wav в директорию с уровнем громкости
+        if os.path.exists(reference_file):
+            reference_copy_path = os.path.join(vol_dir, "reference.wav")
+            shutil.copy2(reference_file, reference_copy_path)
+            logging.info(f"    Скопирован оригинальный reference.wav в {reference_copy_path}")
         
         logging.info(f"    Сохранено в директорию: {vol_dir}")
 
@@ -782,6 +792,9 @@ def process_reference_by_micro(reference_by_micro_data, reference_by_micro_sr, m
     # Создаем основную директорию для reference_by_micro
     reference_by_micro_dir = os.path.join(output_dir, "reference_by_micro")
     os.makedirs(reference_by_micro_dir, exist_ok=True)
+    
+    # Путь к оригинальному reference.wav
+    reference_file = os.path.join(output_dir, "reference.wav")
     
     # Обрабатываем каждую задержку
     for delay_name, delay_ms in delay_levels.items():
@@ -920,8 +933,8 @@ def process_reference_by_micro(reference_by_micro_data, reference_by_micro_sr, m
             logging.info(f"DEBUG:   - my_voice_data (форма): {my_voice_data.shape}")
             
             # Определяем имена файлов
-            reference_volumed_file = os.path.join(vol_dir, "reference_volumed.wav")
-            reference_delayed_file = os.path.join(vol_dir, "reference_volumed_delayed.wav")
+            reference_volumed_file = os.path.join(vol_dir, "reference_by_micro_volumed.wav")
+            reference_delayed_file = os.path.join(vol_dir, "reference_by_micro_volumed_delayed.wav")
             original_input_file = os.path.join(vol_dir, "original_input.wav")
             my_voice_output_file = os.path.join(vol_dir, "my_voice.wav")
             
@@ -931,18 +944,24 @@ def process_reference_by_micro(reference_by_micro_data, reference_by_micro_sr, m
             # Сохраняем оригинальный голос пользователя для сравнения
             sf.write(my_voice_output_file, my_voice_data, my_voice_sr)
             
-            # Сохраняем измененный референсный сигнал без задержки как reference_volumed.wav
+            # Сохраняем измененный референсный сигнал без задержки как reference_by_micro_volumed.wav
             non_delayed_reference_data = reference_by_micro_data * vol_level
             sf.write(reference_volumed_file, non_delayed_reference_data, reference_by_micro_sr)
             
-            # Сохраняем измененный и задержанный референсный сигнал как reference_volumed_delayed
+            # Сохраняем измененный и задержанный референсный сигнал как reference_by_micro_volumed_delayed
             sf.write(reference_delayed_file, micro_adjusted_data, reference_by_micro_sr)
+            
+            # Копируем оригинальный reference.wav в директорию с уровнем громкости
+            if os.path.exists(reference_file):
+                reference_copy_path = os.path.join(vol_dir, "reference.wav")
+                shutil.copy2(reference_file, reference_copy_path)
+                logging.info(f"    Скопирован оригинальный reference.wav в {reference_copy_path}")
             
             logging.info(f"    Сохранено в директорию: {vol_dir}")
             
             # Теперь проверяем задержку между файлами
             
-            # 1. Проверка задержки между reference_volumed.wav и reference_volumed_delayed.wav
+            # 1. Проверка задержки между reference_by_micro_volumed.wav и reference_by_micro_volumed_delayed.wav
             logging.info(f"    Проверка задержки между файлами (по разнице длин):")
             delay_check = verify_delay_between_files_by_length(
                 reference_volumed_file,
@@ -951,8 +970,8 @@ def process_reference_by_micro(reference_by_micro_data, reference_by_micro_sr, m
             )
             
             if "error" not in delay_check:
-                logging.info(f"      Файл reference_volumed.wav: {delay_check['file1_frames']} сэмплов ({delay_check['file1_frames'] * 1000 / reference_by_micro_sr:.2f} мс)")
-                logging.info(f"      Файл reference_volumed_delayed.wav: {delay_check['file2_frames']} сэмплов ({delay_check['file2_frames'] * 1000 / reference_by_micro_sr:.2f} мс)")
+                logging.info(f"      Файл reference_by_micro_volumed.wav: {delay_check['file1_frames']} сэмплов ({delay_check['file1_frames'] * 1000 / reference_by_micro_sr:.2f} мс)")
+                logging.info(f"      Файл reference_by_micro_volumed_delayed.wav: {delay_check['file2_frames']} сэмплов ({delay_check['file2_frames'] * 1000 / reference_by_micro_sr:.2f} мс)")
                 logging.info(f"      Разница в сэмплах: {delay_check['length_diff_samples']} сэмплов")
                 logging.info(f"      Ожидаемая задержка: {actual_delay_ms} мс")
                 logging.info(f"      Измеренная задержка: {delay_check['measured_delay_ms']:.2f} мс")

@@ -542,6 +542,10 @@ def visualize_audio_processing(
     output_dir: str,
     reference_data: Optional[bytes] = None,
     reference_file_path: Optional[str] = None,
+    reference_by_micro_volumed_data: Optional[bytes] = None,
+    reference_by_micro_volumed_file_path: Optional[str] = None,
+    reference_by_micro_volumed_delayed_data: Optional[bytes] = None,
+    reference_by_micro_volumed_delayed_file_path: Optional[str] = None,
     input_data: Optional[bytes] = None,
     input_file_path: Optional[str] = None,
     processed_data: Optional[bytes] = None,
@@ -558,17 +562,22 @@ def visualize_audio_processing(
     
     Args:
         output_dir: Директория для сохранения результатов
-        reference_data: Референсные данные (байты)
+        reference_data: Данные оригинального референсного сигнала (байты)
+        reference_file_path: Путь к оригинальному референсному файлу
+        reference_by_micro_volumed_data: Данные референсного сигнала с измененной громкостью (байты)
+        reference_by_micro_volumed_file_path: Путь к файлу референсного сигнала с измененной громкостью
+        reference_by_micro_volumed_delayed_data: Данные задержанного референсного сигнала (байты)
+        reference_by_micro_volumed_delayed_file_path: Путь к файлу задержанного референсного сигнала
         input_data: Входные данные (байты)
+        input_file_path: Путь к входному файлу
         processed_data: Обработанные данные (байты)
-        reference_delayed_data: Сдвинутые референсные данные (байты), обычно из reference_volumed_delayed.wav
-        metrics: Метрики обработки, включая данные корреляции
-        sample_rate: Частота дискретизации
+        processed_file_path: Путь к обработанному файлу
+        reference_delayed_data: Устаревший параметр, используйте reference_by_micro_volumed_delayed_data
+        reference_delayed_file_path: Устаревший параметр, используйте reference_by_micro_volumed_delayed_file_path
         output_prefix: Префикс для имен выходных файлов
-        reference_file_path: Путь к референсному файлу (для анализа длительности)
-        input_file_path: Путь к входному файлу (для анализа длительности)
-        reference_delayed_file_path: Путь к задержанному референсному файлу (для анализа длительности)
+        sample_rate: Частота дискретизации
         channels: Количество каналов (1 для моно, 2 для стерео)
+        metrics: Метрики обработки, включая данные корреляции
     """
     results = {}
     
@@ -598,9 +607,16 @@ def visualize_audio_processing(
             logging.warning(f"Неверное количество каналов ({channels}), используем значение по умолчанию: 1")
             channels = 1
 
-        ref_file_info, _ = log_file_info(reference_file_path, "Референсный файл")
+        # Для обратной совместимости
+        if reference_delayed_data is None and reference_by_micro_volumed_delayed_data is not None:
+            reference_delayed_data = reference_by_micro_volumed_delayed_data
+        if reference_delayed_file_path is None and reference_by_micro_volumed_delayed_file_path is not None:
+            reference_delayed_file_path = reference_by_micro_volumed_delayed_file_path
+
+        # Логируем информацию о файлах
+        ref_vol_file_info, _ = log_file_info(reference_by_micro_volumed_file_path, "Референсный файл с измененной громкостью")
         input_file_info, _ = log_file_info(input_file_path, "Входной файл")
-        ref_delayed_file_info, _ = log_file_info(reference_delayed_file_path, "Задержанный референсный файл")
+        ref_delayed_file_info, _ = log_file_info(reference_by_micro_volumed_delayed_file_path, "Задержанный референсный файл")
         processed_file_info, _ = log_file_info(processed_file_path, "Обработанный файл")
 
         if ref_delayed_file_info:
@@ -611,40 +627,43 @@ def visualize_audio_processing(
                 duration_diff_ms = ref_delayed_file_info['duration_ms'] - ref_delayed_file_info['reference']['duration_ms']
                 logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {duration_diff_ms:.2f} мс")
 
-        logging.info(f"  Размер reference_data: {len(reference_data)} байт")
-        logging.info(f"  Размер input_data: {len(input_data)} байт")
+        # Логируем размеры данных
+        if reference_by_micro_volumed_data:
+            logging.info(f"  Размер reference_by_micro_volumed_data: {len(reference_by_micro_volumed_data)} байт")
+        if input_data:
+            logging.info(f"  Размер input_data: {len(input_data)} байт")
         
         # Передаем количество каналов в функцию bytes_to_numpy
-        ref_array = bytes_to_numpy(reference_data, sample_rate, channels)
+        ref_vol_array = bytes_to_numpy(reference_by_micro_volumed_data, sample_rate, channels)
         ref_delayed_array = bytes_to_numpy(reference_delayed_data, sample_rate, channels)
         in_array = bytes_to_numpy(input_data, sample_rate, channels)
         processed_array = bytes_to_numpy(processed_data, sample_rate, channels)
         
         # Логируем подробную информацию о массивах
-        logging.info(format_array_info("Референсный массив (ref_array)", ref_array, sample_rate))
+        logging.info(format_array_info("Референсный массив с измененной громкостью (ref_vol_array)", ref_vol_array, sample_rate))
         logging.info(format_array_info("Задержанный референсный массив (ref_delayed_array)", ref_delayed_array, sample_rate))
         logging.info(format_array_info("Входной массив (in_array)", in_array, sample_rate))
         logging.info(format_array_info("Обработанный массив (processed_array)", processed_array, sample_rate))
         
         # Вычисляем длительность в зависимости от формата данных
-        if len(ref_array.shape) > 1:  # Стерео
-            ref_duration = ref_array.shape[0] / sample_rate
+        if len(ref_vol_array.shape) > 1:  # Стерео
+            ref_duration = ref_vol_array.shape[0] / sample_rate
         else:  # Моно
-            ref_duration = len(ref_array) / sample_rate
+            ref_duration = len(ref_vol_array) / sample_rate
             
         if len(in_array.shape) > 1:  # Стерео
             in_duration = in_array.shape[0] / sample_rate
         else:  # Моно
             in_duration = len(in_array) / sample_rate
             
-        logging.info(f"  Длительность ref: {ref_duration:.3f} сек")
+        logging.info(f"  Длительность ref_vol: {ref_duration:.3f} сек")
         logging.info(f"  Длительность in: {in_duration:.3f} сек")
 
         # Для каждого массива определяем одноканальную версию для отображения
-        if len(ref_array.shape) > 1:
-            ref_channel = ref_array[:, 0]  # Берем первый канал для отображения
+        if len(ref_vol_array.shape) > 1:
+            ref_channel = ref_vol_array[:, 0]  # Берем первый канал для отображения
         else:
-            ref_channel = ref_array
+            ref_channel = ref_vol_array
 
         if len(ref_delayed_array.shape) > 1:
             ref_delayed_channel = ref_delayed_array[:, 0]
@@ -671,19 +690,22 @@ def visualize_audio_processing(
             logging.info(f"Корреляция была рассчитана внутри функции визуализации")
         
         # Вычисляем длительность сигналов в миллисекундах
-        ref_duration_ms = len(ref_array) * 1000 / sample_rate
-        assert ref_duration_ms == ref_file_info['duration_ms']
+        ref_vol_duration_ms = len(ref_vol_array) * 1000 / sample_rate
+        if ref_vol_file_info:
+            assert ref_vol_duration_ms == ref_vol_file_info['duration_ms']
 
         in_duration_ms = len(in_array) * 1000 / sample_rate
-        assert in_duration_ms == input_file_info['duration_ms']
+        if input_file_info:
+            assert in_duration_ms == input_file_info['duration_ms']
 
         ref_delayed_duration_ms = len(ref_delayed_array) * 1000 / sample_rate
-        assert ref_delayed_duration_ms == ref_delayed_file_info['duration_ms']
+        if ref_delayed_file_info:
+            assert ref_delayed_duration_ms == ref_delayed_file_info['duration_ms']
 
         # Логируем информацию о длительности
-        logging.info(f"Длительность reference_volumed.wav: {ref_duration_ms:.2f} мс")
+        logging.info(f"Длительность reference_by_micro_volumed.wav: {ref_vol_duration_ms:.2f} мс")
         logging.info(f"Длительность original_input.wav: {in_duration_ms:.2f} мс")
-        logging.info(f"Длительность reference_volumed_delayed.wav: {ref_delayed_duration_ms:.2f} мс")
+        logging.info(f"Длительность reference_by_micro_volumed_delayed.wav: {ref_delayed_duration_ms:.2f} мс")
 
         processed_array = bytes_to_numpy(processed_data, sample_rate, channels)
         if len(processed_array.shape) > 1:
@@ -781,7 +803,7 @@ def visualize_audio_processing(
         # Вычисляем и логируем статистику
         results = calculate_and_log_statistics(
             in_array,
-            ref_array,
+            ref_vol_array,  # Используем ref_vol_array вместо ref_array
             processed_array, 
             processed_data,
             delay_ms,
