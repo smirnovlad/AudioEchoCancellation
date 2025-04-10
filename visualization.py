@@ -276,10 +276,16 @@ def visualize_one_channel(
     plot_reference_signals(
         plt_figure,
         (num_plots, num_cols, 1 + col_offset),
-        ref_by_micro_volumed_channel,
-        ref_by_micro_volumed_delayed_channel,
-        frame_rate,
-        ref_delay_ms,
+        ref_by_micro_volumed_channel = {
+            'channel': ref_by_micro_volumed_channel,
+            'audio_file': 'ref_by_micro_volumed.wav'
+        },
+        ref_by_micro_volumed_delayed_channel = {
+            'channel': ref_by_micro_volumed_delayed_channel,
+            'audio_file': 'ref_by_micro_volumed_delayed.wav'
+        },
+        sample_rate=frame_rate,
+        ref_delay_ms=ref_delay_ms,
         channel_num=channel_num
     )
     
@@ -297,14 +303,20 @@ def visualize_one_channel(
     plot_original_and_by_micro_volumed_reference_signals(
         plt_figure,
         (num_plots, num_cols, num_cols*2 + 1 + col_offset),
-        ref_channel,
-        ref_by_micro_volumed_channel,
-        frame_rate,
+        ref_channel = {
+            'channel': ref_channel,
+            'audio_file': 'reference.wav'
+        },
+        ref_by_micro_volumed_channel = {
+            'channel': ref_by_micro_volumed_channel,
+            'audio_file': 'ref_by_micro_volumed.wav'
+        },
+        sample_rate=frame_rate,
         channel_num=channel_num
     )
     
     # 4. График корреляции оригинального и на входе в микро референсных сигналов
-    plot_original_and_by_micro_volumed_reference_correlation(
+    ref_delay_ms = plot_original_and_by_micro_volumed_reference_correlation(
         plt_figure,
         (num_plots, num_cols, num_cols*3 + 1 + col_offset),
         ref_channel,
@@ -314,12 +326,20 @@ def visualize_one_channel(
     )
     
     # 5. График оригинального референсного и входного сигналов
-    plot_original_reference_and_input_signals(
+    plot_corrected_original_and_by_micro_volumed_reference_signals(
         plt_figure,
         (num_plots, num_cols, num_cols*4 + 1 + col_offset),
-        ref_by_micro_volumed_delayed_channel,
-        in_channel,
-        frame_rate,
+        reference_channel = {
+            'channel': ref_channel,
+            'audio_file': 'reference.wav',
+        },
+        ref_by_micro_volumed_channel = {
+            'channel': ref_by_micro_volumed_channel,
+            'audio_file': 'ref_by_micro_volumed.wav',
+        },
+        sample_rate=frame_rate,
+        lag=lag,
+        delay_ms=ref_delay_ms,
         channel_num=channel_num
     )
     
@@ -327,10 +347,16 @@ def visualize_one_channel(
     plot_original_signals(
         plt_figure,
         (num_plots, num_cols, num_cols*5 + 1 + col_offset),
-        ref_channel,
-        in_channel,
-        time_axis_ms,
-        delay_ms,
+        ref_channel ={
+            'channel': ref_channel,
+            'audio_file': 'reference.wav'
+        },
+        in_channel = {
+            'channel': in_channel,
+            'audio_file': 'original_input.wav'
+        },
+        time_axis_ms=time_axis_ms,
+        delay_ms=delay_ms,
         channel_num=channel_num
     )
     
@@ -350,11 +376,17 @@ def visualize_one_channel(
     plot_corrected_signals(
         plt_figure,
         (num_plots, num_cols, num_cols*7 + 1 + col_offset),
-        ref_channel,
-        in_channel,
-        time_axis_ms,
-        lag,
-        delay_ms,
+        ref_channel = {
+            'channel': ref_channel,
+            'audio_file': 'reference.wav'
+        },
+        in_channel = {
+            'channel': in_channel,
+            'audio_file': 'original_input.wav'
+        },
+        time_axis_ms=time_axis_ms,
+        lag=lag,
+        delay_ms=delay_ms,
         channel_num=channel_num
     )
     
@@ -362,12 +394,15 @@ def visualize_one_channel(
     plot_processed_signals(
         plt_figure,
         (num_plots, num_cols, num_cols*8 + 1 + col_offset),
-        in_channel,
-        processed_channel,
-        time_axis_ms,
-        frame_rate,
-        num_cols,  # передаем num_cols вместо n_channels
-        channel_num=channel_num
+        in_channel = {
+            'channel': in_channel,
+            'audio_file': 'original_input.wav',
+        },
+        processed_channel = {
+            'channel': processed_channel,
+            'audio_file': 'processed_input.wav',
+        },
+        time_axis_ms=time_axis_ms,
     )
     
     # Возвращаем данные о задержке для использования в статистике
@@ -506,8 +541,10 @@ def visualize_audio_processing(
         num_cols = 2 if has_second_channel else 1
 
         # Создаем график с учетом второго канала
-        fig_width = 20 if has_second_channel else 12  # Шире если есть второй канал
-        fig_height = 4 * num_plots  # Высота остается прежней
+        one_plot_height = 6
+        one_plot_width = 30
+        fig_width = 2 * one_plot_width if has_second_channel else one_plot_width  # Шире если есть второй канал
+        fig_height = one_plot_height * num_plots  # Высота остается прежней
         
         plt.figure(figsize=(fig_width, fig_height))
 
@@ -547,17 +584,67 @@ def visualize_audio_processing(
             )
 
         plt.tight_layout()
+        
+        # Create plots directory if it doesn't exist
+        plots_dir = os.path.join(output_dir, f'{output_prefix}_plots')
+        os.makedirs(plots_dir, exist_ok=True)
+        
+        # Save each subplot as a separate file
+        fig = plt.gcf()
+        for i, ax in enumerate(fig.get_axes()):
+            # Create a new figure for each subplot
+            subplot_fig = plt.figure(figsize=(one_plot_width, one_plot_height))
+            subplot_ax = subplot_fig.add_subplot(111)
+            
+            # Copy the content from the original subplot
+            for line in ax.get_lines():
+                subplot_ax.plot(line.get_xdata(), line.get_ydata(), 
+                               color=line.get_color(), 
+                               linestyle=line.get_linestyle(),
+                               label=line.get_label(),
+                               alpha=line.get_alpha())
+            
+            # Copy other elements like title, labels, grid, etc.
+            subplot_ax.set_title(ax.get_title())
+            subplot_ax.set_xlabel(ax.get_xlabel())
+            subplot_ax.set_ylabel(ax.get_ylabel())
+            subplot_ax.set_xlim(ax.get_xlim())
+            subplot_ax.set_ylim(ax.get_ylim())
+            
+            # Copy grid settings - fix the AttributeError
+            subplot_ax.grid(True)  # Just enable grid for all individual plots
+            
+            # Copy legend if present
+            if ax.get_legend():
+                subplot_ax.legend()
+            
+            # Copy vertical and horizontal lines
+            for line in ax.get_lines():
+                if len(line.get_xdata()) == 2:
+                    if line.get_xdata()[0] == line.get_xdata()[1]:  # vertical line
+                        subplot_ax.axvline(x=line.get_xdata()[0], color=line.get_color(), 
+                                          linestyle=line.get_linestyle(), label=line.get_label())
+            
+            # Save individual plot
+            plot_number = i + 1
+            subplot_file = os.path.join(plots_dir, f'plot_{plot_number}.png')
+            subplot_fig.tight_layout()
+            subplot_fig.savefig(subplot_file)
+            plt.close(subplot_fig)
+            
+        # Save the original combined figure
         signals_file = os.path.join(output_dir, f'{output_prefix}_signals.png')
         plt.savefig(signals_file)
         plt.close()
         logging.info(f"Визуализация сигналов сохранена в {signals_file}")
+        logging.info(f"Отдельные графики сохранены в {plots_dir}")
         
         # Вычисляем и логируем статистику
         results = calculate_and_log_statistics(
             in_array,
             ref_by_micro_volumed_array,  # Используем ref_by_micro_volumed_array вместо ref_array
             processed_array, 
-            processed_data,
+            processed_file_info['raw_frames'],
             delay_ms,
             lag,
             results

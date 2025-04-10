@@ -24,8 +24,8 @@ def plot_original_signals(
         delay_ms: Вычисленная задержка в миллисекундах
     """
     plt_figure.subplot(*subplot_position)
-    plt_figure.plot(time_axis_ms, ref_channel, label='Референсный', alpha=0.7, color='blue')
-    plt_figure.plot(time_axis_ms, in_channel, label='Входной', alpha=0.7, color='green')
+    plt_figure.plot(time_axis_ms, ref_channel['channel'], label=ref_channel['audio_file'], alpha=0.7, color='blue')
+    plt_figure.plot(time_axis_ms, in_channel['channel'], label=in_channel['audio_file'], alpha=0.7, color='orange')
     plt_figure.title(f'{subplot_position[-1]}. Референсный и входной сигналы (задержка: {delay_ms:.2f} мс)')
 
     # Определяем максимальное значение для отображения и шаг
@@ -51,7 +51,7 @@ def plot_original_signals(
 def plot_reference_signals(
     plt_figure,
     subplot_position,
-    ref_channel,
+    ref_by_micro_volumed_channel,
     ref_by_micro_volumed_delayed_channel,
     sample_rate,
     ref_delay_ms=None,
@@ -72,7 +72,7 @@ def plot_reference_signals(
     
     # Определяем максимальную длительность для отображения (в мс)
     # Используем длину обработанного файла, но не менее 8000 мс и не более 40000 мс
-    max_display_ms = max(8000, min(40000, max(len(ref_channel), len(ref_by_micro_volumed_delayed_channel)) * 1000 / sample_rate))
+    max_display_ms = max(8000, min(40000, max(len(ref_by_micro_volumed_channel['channel']), len(ref_by_micro_volumed_delayed_channel['channel'])) * 1000 / sample_rate))
     display_samples = int(max_display_ms * sample_rate / 1000)
     
     # Определяем шаг деления оси X в зависимости от длительности
@@ -85,26 +85,26 @@ def plot_reference_signals(
     
     # Дополняем оба массива нулями до display_samples
     padded_ref = np.zeros(display_samples)
-    padded_ref[:len(ref_channel)] = ref_channel
+    padded_ref[:len(ref_by_micro_volumed_channel['channel'])] = ref_by_micro_volumed_channel['channel']
     
     padded_ref_delayed = np.zeros(display_samples)
-    padded_ref_delayed[:len(ref_by_micro_volumed_delayed_channel)] = ref_by_micro_volumed_delayed_channel
+    padded_ref_delayed[:len(ref_by_micro_volumed_delayed_channel['channel'])] = ref_by_micro_volumed_delayed_channel['channel']
     
     # Используем дополненные массивы
-    ref_channel = padded_ref
-    ref_by_micro_volumed_delayed_channel = padded_ref_delayed
+    ref_by_micro_volumed_channel['channel'] = padded_ref
+    ref_by_micro_volumed_delayed_channel['channel'] = padded_ref_delayed
     
     logging.info(f"Референсные сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
-    logging.info(f"Исходная длина ref_channel: {len(ref_channel)} семплов")
+    logging.info(f"Исходная длина ref_channel: {len(ref_by_micro_volumed_channel['channel'])} семплов")
     logging.info(f"Исходная длина ref_by_micro_volumed_delayed_channel: {len(ref_by_micro_volumed_delayed_channel)} семплов")
     
     # Создаем расширенную временную ось для отображения
     display_time_ms = np.arange(display_samples) * 1000 / sample_rate
     
     # Строим графики используя подготовленные массивы с одинаковой длиной
-    plt_figure.plot(display_time_ms, ref_channel, label=f'Референс на входе в микро', alpha=0.7, color='blue')
-    plt_figure.plot(display_time_ms, ref_by_micro_volumed_delayed_channel, label=f'Задержанный референс на входе в микро', alpha=0.7, color='red')
-    
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_channel['channel'], label=ref_by_micro_volumed_channel['audio_file'], alpha=0.7, color='blue')
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_delayed_channel['channel'], label=ref_by_micro_volumed_delayed_channel['audio_file'], alpha=0.7, color='orange')
+
     # Если есть задержка, вычисленная по корреляции, отображаем её
     if ref_delay_ms is not None:
         plt_figure.axvline(x=ref_delay_ms, color='g', linestyle='--', 
@@ -239,7 +239,7 @@ def plot_original_and_by_micro_volumed_reference_signals(
     
     # Определяем максимальную длительность для отображения (в мс)
     # Используем длину обработанного файла, но не менее 8000 мс и не более 40000 мс
-    max_display_ms = max(8000, min(40000, max(len(ref_channel), len(ref_by_micro_volumed_channel)) * 1000 / sample_rate))
+    max_display_ms = max(8000, min(40000, max(len(ref_channel['channel']), len(ref_by_micro_volumed_channel['channel'])) * 1000 / sample_rate))
     display_samples = int(max_display_ms * sample_rate / 1000)
     
     # Определяем шаг деления оси X в зависимости от длительности
@@ -252,14 +252,14 @@ def plot_original_and_by_micro_volumed_reference_signals(
     
     # Дополняем оба массива нулями до display_samples
     padded_ref = np.zeros(display_samples)
-    padded_ref[:len(ref_channel)] = ref_channel
+    padded_ref[:len(ref_channel['channel'])] = ref_channel['channel']
     
     padded_ref_by_micro_volumed = np.zeros(display_samples)
-    padded_ref_by_micro_volumed[:len(ref_by_micro_volumed_channel)] = ref_by_micro_volumed_channel
+    padded_ref_by_micro_volumed[:len(ref_by_micro_volumed_channel['channel'])] = ref_by_micro_volumed_channel['channel']
     
     # Используем дополненные массивы
-    ref_channel = padded_ref
-    ref_by_micro_volumed_channel = padded_ref_by_micro_volumed
+    ref_channel['channel'] = padded_ref
+    ref_by_micro_volumed_channel['channel'] = padded_ref_by_micro_volumed
     
     logging.info(f"Оригинальный и с измененной громкостью референсные сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
     
@@ -267,8 +267,8 @@ def plot_original_and_by_micro_volumed_reference_signals(
     display_time_ms = np.arange(display_samples) * 1000 / sample_rate
     
     # Строим графики используя подготовленные массивы с одинаковой длиной
-    plt_figure.plot(display_time_ms, ref_channel, label=f'Оригинальный референс', alpha=0.7, color='blue')
-    plt_figure.plot(display_time_ms, ref_by_micro_volumed_channel, label=f'Референс на входе в микро и другой громкостью', alpha=0.7, color='purple')
+    plt_figure.plot(display_time_ms, ref_channel['channel'], label=ref_channel['audio_file'], alpha=0.7, color='blue')
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_channel['channel'], label=ref_by_micro_volumed_channel['audio_file'], alpha=0.7, color='orange')
     
     plt_figure.title(f'{subplot_position[-1]}. Сравнение оригинального и с измененной громкостью референсных сигналов')
     
@@ -282,12 +282,14 @@ def plot_original_and_by_micro_volumed_reference_signals(
     plt_figure.grid(True)
     plt_figure.legend()
 
-def plot_original_reference_and_input_signals(
+def plot_corrected_original_and_by_micro_volumed_reference_signals(
     plt_figure,
     subplot_position,
-    ref_by_micro_volumed_delayed_channel,
-    in_channel,
+    reference_channel,
+    ref_by_micro_volumed_channel,
     sample_rate,
+    lag,
+    delay_ms,
     channel_num=1
 ):
     """
@@ -303,9 +305,20 @@ def plot_original_reference_and_input_signals(
     """
     plt_figure.subplot(*subplot_position)
     
+        
+    # Определяем corrected_in_array и corrected_ref_array
+    if lag >= 0:
+        # Входной сигнал задержан относительно референсного
+        corrected_reference_channel = reference_channel['channel']
+        corrected_ref_by_micro_volumed_channel = np.roll(ref_by_micro_volumed_channel['channel'], -lag)
+    else:
+        # Референсный сигнал задержан относительно входного
+        corrected_reference_channel = np.roll(reference_channel['channel'], -lag)
+        corrected_ref_by_micro_volumed_channel = ref_by_micro_volumed_channel['channel']
+
     # Определяем максимальную длительность для отображения (в мс)
     # Используем длину обработанного файла, но не менее 8000 мс и не более 40000 мс
-    max_display_ms = max(8000, min(40000, max(len(ref_by_micro_volumed_delayed_channel), len(in_channel)) * 1000 / sample_rate))
+    max_display_ms = max(8000, min(40000, max(len(corrected_ref_by_micro_volumed_channel), len(corrected_reference_channel)) * 1000 / sample_rate))
     display_samples = int(max_display_ms * sample_rate / 1000)
     
     # Определяем шаг деления оси X в зависимости от длительности
@@ -317,26 +330,26 @@ def plot_original_reference_and_input_signals(
         tick_step_ms = 2000  # шаг 2000мс для длительности более 20 секунд
     
     # Дополняем оба массива нулями до display_samples
-    padded_ref_delayed = np.zeros(display_samples)
-    padded_ref_delayed[:len(ref_by_micro_volumed_delayed_channel)] = ref_by_micro_volumed_delayed_channel
+    padded_ref = np.zeros(display_samples)
+    padded_ref[:len(corrected_reference_channel)] = corrected_reference_channel
     
-    padded_in = np.zeros(display_samples)
-    padded_in[:len(in_channel)] = in_channel
+    padded_ref_by_micro_volumed = np.zeros(display_samples)
+    padded_ref_by_micro_volumed[:len(corrected_ref_by_micro_volumed_channel)] = corrected_ref_by_micro_volumed_channel
     
     # Используем дополненные массивы
-    ref_by_micro_volumed_delayed_channel = padded_ref_delayed
-    in_channel = padded_in
+    reference_channel['channel'] = padded_ref
+    ref_by_micro_volumed_channel['channel'] = padded_ref_by_micro_volumed
     
-    logging.info(f"Задержанный референсный и входной сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
+    logging.info(f"Оригинальный референсный и референсный на входе в микрофон (с изменённой громкостью) сигналы дополнены нулями до {max_display_ms} мс ({display_samples} семплов)")
     
     # Создаем расширенную временную ось для отображения
     display_time_ms = np.arange(display_samples) * 1000 / sample_rate
     
     # Строим графики используя подготовленные массивы с одинаковой длиной
-    plt_figure.plot(display_time_ms, ref_by_micro_volumed_delayed_channel, label=f'Задержанный референс на входе в микро', alpha=0.7, color='red')
-    plt_figure.plot(display_time_ms, in_channel, label=f'Входной сигнал', alpha=0.7, color='green')
+    plt_figure.plot(display_time_ms, reference_channel['channel'], label=reference_channel['audio_file'], alpha=0.7, color='blue')
+    plt_figure.plot(display_time_ms, ref_by_micro_volumed_channel['channel'], label=ref_by_micro_volumed_channel['audio_file'], alpha=0.7, color='orange')
     
-    plt_figure.title(f'{subplot_position[-1]}. Задержанный референсный сигнал в микро и входной сигнал')
+    plt_figure.title(f'{subplot_position[-1]}. Оригинальный референсный и референсный на входе в микрофон сигналы с учётом задержки ({delay_ms:.2f} мс)')
     
     # Добавляем более детальные деления на оси X с динамическим шагом
     plt_figure.xticks(np.arange(0, max_display_ms + 1, tick_step_ms))
@@ -460,7 +473,7 @@ def plot_original_and_by_micro_volumed_reference_correlation(
         logging.warning("Не найдено положительных значений задержки в оригинальной корреляции, используется максимальная корреляция")
 
     # Строим график корреляции
-    plt_figure.plot(corr_time_ms, corr, color='blue')
+    plt_figure.plot(corr_time_ms, corr, color='green')
     plt_figure.axvline(x=ref_delay_ms, color='r', linestyle='--', 
                 label=f'Измеренная задержка: {ref_delay_ms:.2f} мс')
 
@@ -518,16 +531,16 @@ def plot_corrected_signals(
     # Определяем corrected_in_array и corrected_ref_array
     if lag >= 0:
         # Входной сигнал задержан относительно референсного
-        corrected_in_array = np.roll(in_channel, -lag)
-        corrected_ref_array = ref_channel
+        corrected_in_array = np.roll(in_channel['channel'], -lag)
+        corrected_ref_array = ref_channel['channel']
     else:
         # Референсный сигнал задержан относительно входного
-        corrected_ref_array = np.roll(ref_channel, lag)
-        corrected_in_array = in_channel
+        corrected_ref_array = np.roll(ref_channel['channel'], lag)
+        corrected_in_array = in_channel['channel']
         
     # Используем те же цвета, что и на графике оригинальных сигналов
-    plt_figure.plot(time_axis_ms, corrected_ref_array, label='Референсный', alpha=0.7, color='blue')
-    plt_figure.plot(time_axis_ms, corrected_in_array, label='Входной', alpha=0.7, color='green')
+    plt_figure.plot(time_axis_ms, corrected_ref_array, label=ref_channel['audio_file'], alpha=0.7, color='blue')
+    plt_figure.plot(time_axis_ms, corrected_in_array, label=in_channel['audio_file'], alpha=0.7, color='orange')
     
     plt_figure.title(f'{subplot_position[-1]}. Сигналы с учётом задержки ({delay_ms:.2f} мс)')
     
@@ -557,9 +570,6 @@ def plot_processed_signals(
     in_channel,
     processed_channel,
     time_axis_ms,
-    sample_rate,
-    channels,
-    channel_num=1
 ):
     """
     Отображает график сравнения исходного и обработанного сигналов.
@@ -576,39 +586,39 @@ def plot_processed_signals(
     plt_figure.subplot(*subplot_position)
     
     # Проверяем и приводим к одинаковой длине, если размеры массивов не совпадают
-    if len(in_channel) != len(processed_channel):
-        logging.info(f"Размеры входного ({len(in_channel)}) и обработанного ({len(processed_channel)}) сигналов не совпадают. Приводим к одинаковой длине.")
-        min_length = min(len(in_channel), len(processed_channel))
-        in_channel = in_channel[:min_length]
-        processed_channel = processed_channel[:min_length]
+    if len(in_channel['channel']) != len(processed_channel['channel']):
+        logging.info(f"Размеры входного ({len(in_channel['channel'])}) и обработанного ({len(processed_channel['channel'])}) сигналов не совпадают. Приводим к одинаковой длине.")
+        min_length = min(len(in_channel['channel']), len(processed_channel['channel']))
+        in_channel['channel'] = in_channel['channel'][:min_length]
+        processed_channel['channel'] = processed_channel['channel'][:min_length]
         # Также обновляем time_axis_ms до минимальной длины
         time_axis_ms = time_axis_ms[:min_length]
         logging.info(f"Новая длина сигналов: {min_length}")
     
-    # Нормализуем входной сигнал, если он есть
-    if len(in_channel) > 0:
-        in_max = max(abs(np.max(in_channel)), abs(np.min(in_channel)))
-        normalized_in = in_channel / in_max if in_max > 0 else in_channel
-    else:
-        normalized_in = in_channel
+    # # Нормализуем входной сигнал, если он есть
+    # if len(in_channel) > 0:
+    #     in_max = max(abs(np.max(in_channel)), abs(np.min(in_channel)))
+    #     normalized_in = in_channel / in_max if in_max > 0 else in_channel
+    # else:
+    #     normalized_in = in_channel
         
     # Рисуем входной сигнал
-    plt_figure.plot(time_axis_ms, normalized_in, label='Исходный входной', alpha=0.7, color='green', linewidth=1.2)
+    plt_figure.plot(time_axis_ms, in_channel['channel'], label=in_channel['audio_file'], alpha=0.7, color='blue', linewidth=1.2)
 
-    # Нормализуем обработанный сигнал
-    if len(processed_channel) > 0:
-        proc_max = max(abs(np.max(processed_channel)), abs(np.min(processed_channel)))
-        normalized_proc = processed_channel / proc_max if proc_max > 0 else processed_channel
-    else:
-        normalized_proc = processed_channel
+    # # Нормализуем обработанный сигнал
+    # if len(processed_channel) > 0:
+    #     proc_max = max(abs(np.max(processed_channel)), abs(np.min(processed_channel)))
+    #     normalized_proc = processed_channel / proc_max if proc_max > 0 else processed_channel
+    # else:
+    #     normalized_proc = processed_channel
     
     # Сдвигаем нормализованный обработанный сигнал немного вниз для лучшей видимости
-    plt_figure.plot(time_axis_ms, normalized_proc, label='Обработанный AEC', alpha=0.7, color='red', linewidth=1.2)
+    plt_figure.plot(time_axis_ms, processed_channel['channel'], label=processed_channel['audio_file'], alpha=0.7, color='orange', linewidth=1.2)
     
     # Добавляем аннотацию о нормализации
-    plt_figure.annotate("Оба сигнала нормализованы для лучшей видимости",
-                    xy=(0.02, 0.95), xycoords='axes fraction', 
-                    color='black', fontsize=9, alpha=0.8)
+    # plt_figure.annotate("Оба сигнала нормализованы для лучшей видимости",
+    #                 xy=(0.02, 0.95), xycoords='axes fraction', 
+    #                 color='black', fontsize=9, alpha=0.8)
     
     plt_figure.title(f'{subplot_position[-1]}. Сравнение исходного и обработанного сигналов')
     

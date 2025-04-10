@@ -215,9 +215,10 @@ def prepare_all_test_directories():
     
     # Список директорий с тестами
     test_dirs = [
-        os.path.join(base_dir, "agent_speech"),
-        os.path.join(base_dir, "agent_user_speech"),
-        os.path.join(base_dir, "agent_speech_30_sec"),
+        # os.path.join(base_dir, "agent_speech"),
+        # os.path.join(base_dir, "agent_user_speech"),
+        # os.path.join(base_dir, "agent_speech_30_sec"),
+        os.path.join(base_dir, "agent_user_speech_30_sec"),
     ]
     
     # Директория music обрабатывается по-старому (без разделения на mono/stereo)

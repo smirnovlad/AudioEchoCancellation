@@ -257,7 +257,7 @@ def process_audio_with_aec(
         delay_samples, delay_ms, confidence = aec_session.auto_set_delay(
             reference_file_info['raw_frames'],
             original_input_file_info['raw_frames'],
-            actual_delay_ms=890,
+            actual_delay_ms=654
         )
         logging.info(f"Обнаружена задержка: {delay_samples} семплов ({delay_ms:.2f} мс), уверенность: {confidence:.4f}")
         
@@ -334,7 +334,7 @@ def process_audio_with_aec(
         # Буферизация для компенсации задержки
         delay_frames = int(delay_samples / frame_size)
         # pre_buffer_size = max(5, delay_frames) # Минимум 5 фреймов для предварительной буферизации
-        pre_buffer_size = 0
+        pre_buffer_size = delay_frames
 
         # Предварительная буферизация референсных фреймов
         for i in range(min(pre_buffer_size, len(ref_frames))):
