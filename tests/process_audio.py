@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from typing import Dict, Any, Tuple, Optional, Union, List
 
 # Настройка логирования
 logging.basicConfig(
@@ -138,17 +139,27 @@ def find_test_directories(base_dir="tests"):
     
     return test_dirs
 
-def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=16000, channels=1, 
-                           visualize=True, output_dir="results", frame_size_ms=10.0):
+def process_audio_with_aec(
+        processed_file_path,
+        reference_file_info,
+        original_input_file_info,
+        reference_by_micro_volumed_file_info,
+        reference_by_micro_volumed_delayed_file_info,
+        frame_rate=16000,
+        n_channels=1, 
+        visualize=True,
+        output_dir="results",
+        frame_size_ms=10.0
+    ):
     """
     Обрабатывает аудиофайлы с использованием AEC и сохраняет результаты.
     
     Args:
-        input_file: Путь к входному файлу
-        output_file: Путь к файлу для сохранения результата
-        reference_file: Путь к файлу с референсным сигналом
-        sample_rate: Частота дискретизации
-        channels: Количество каналов (1 или 2)
+        original_input_file: Путь к входному файлу
+        processed_file_path: Путь к файлу для сохранения результата
+        reference_file_path: Путь к файлу с референсным сигналом
+        frame_rate: Частота дискретизации
+        n_channels: Количество каналов (1 или 2)
         visualize: Флаг для визуализации результатов
         output_dir: Директория для сохранения результатов
         frame_size_ms: Размер фрейма в миллисекундах
@@ -172,136 +183,34 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
     )
     
     try:
-        logging.info(f"Обработка файла {input_file} с помощью AEC...")
-        
-        # Используем utils.py для подробного анализа всех WAV файлов
-        logging.info("\n=== Детальный анализ входных файлов ===")
-        
-        # Анализируем референсный файл
-        logging.info("\n>>> Анализ референсного файла <<<")
-        ref_info, ref_channels = log_file_info(reference_file, "Референсный файл")
-        if not ref_info:
-            logging.error(f"Не удалось получить информацию о референсном файле {reference_file}")
-            return {}
-            
-        # Анализируем входной файл
-        logging.info("\n>>> Анализ входного файла <<<")
-        input_info, in_channels = log_file_info(input_file, "Входной файл")
-        if not input_info:
-            logging.error(f"Не удалось получить информацию о входном файле {input_file}")
-            return {}
-            
-        # Анализируем файл reference_by_micro_volumed.wav, если он существует
-        ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
-        ref_vol_info = None
-        ref_vol_data = None
-        
-        if os.path.exists(ref_vol_file):
-            logging.info("\n>>> Анализ файла с измененной громкостью <<<")
-            ref_vol_info, _ = log_file_info(ref_vol_file, "Референсный файл с измененной громкостью")
-            
-            # Читаем данные из файла с измененной громкостью
-            try:
-                with wave.open(ref_vol_file, 'rb') as ref_vol_wf:
-                    ref_vol_data = ref_vol_wf.readframes(ref_vol_wf.getnframes())
-            except Exception as e:
-                logging.warning(f"Не удалось прочитать файл {ref_vol_file}: {e}")
-            
-        # Анализируем задержанный референсный файл, если он существует
-        reference_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed_delayed.wav")
-        ref_delayed_info = None
-        ref_delayed_data = None
-        
-        if os.path.exists(reference_delayed_file):
-            logging.info("\n>>> Анализ задержанного референсного файла <<<")
-            ref_delayed_info, _ = log_file_info(reference_delayed_file, "Задержанный референсный файл")
-            
-            # Читаем данные из задержанного файла
-            try:
-                with wave.open(reference_delayed_file, 'rb') as ref_delayed_wf:
-                    ref_delayed_data = ref_delayed_wf.readframes(ref_delayed_wf.getnframes())
-                    
-                # Вычисляем задержку как разницу длительностей между оригинальным и задержанным файлом
-                if ref_info and ref_delayed_info:
-                    delay_diff_ms = ref_delayed_info['duration_ms'] - ref_info['duration_ms']
-                    logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {delay_diff_ms:.2f} мс")
-            except Exception as e:
-                logging.warning(f"Не удалось прочитать задержанный референсный файл: {e}")
-        
-        # Анализируем статистику амплитуд
-        ref_stats = get_wav_amplitude_stats(reference_file)
-        if ref_stats:
-            logging.info("\n>>> Статистика амплитуд референсного файла <<<")
-            for stats in ref_stats:
-                ch = stats['channel']
-                logging.info(f"Канал {ch}: мин={stats['min']:.6f}, макс={stats['max']:.6f}, сред={stats['mean']:.6f}, RMS={stats['rms']:.6f}")
-        
-        in_stats = get_wav_amplitude_stats(input_file)
-        if in_stats:
-            logging.info("\n>>> Статистика амплитуд входного файла <<<")
-            for stats in in_stats:
-                ch = stats['channel']
-                logging.info(f"Канал {ch}: мин={stats['min']:.6f}, макс={stats['max']:.6f}, сред={stats['mean']:.6f}, RMS={stats['rms']:.6f}")
-        
-        # Сравнение характеристик файлов
-        logging.info("\n=== Проверка совместимости файлов ===")
-        
-        # Проверяем частоты дискретизации
-        if ref_info['framerate'] != input_info['framerate']:
-            logging.warning(f"Частоты дискретизации файлов не совпадают: {ref_info['framerate']} vs {input_info['framerate']}")
-            logging.warning("Для корректной работы AEC необходимы одинаковые частоты дискретизации")
-        else:
-            logging.info(f"Частоты дискретизации файлов совпадают: {ref_info['framerate']} Гц")
-            
-        # Проверяем количество каналов
-        if ref_info['n_channels'] != input_info['n_channels']:
-            logging.warning(f"Количество каналов в файлах не совпадает: {ref_info['n_channels']} vs {input_info['n_channels']}")
-            logging.warning("AEC будет использовать количество каналов из входного файла")
-        else:
-            logging.info(f"Количество каналов в файлах совпадает: {ref_info['n_channels']}")
-            
-        # Используем количество каналов из входного файла
-        channels = input_info['n_channels']
-        logging.info(f"Используем количество каналов: {channels}")
+        logging.info(f"Обработка файла {original_input_file_info['file_path']} с помощью AEC...")
+        logging.info(f"Используем количество каналов: {n_channels}")
         
         # Проверяем длительность
-        if abs(ref_info['duration_ms'] - input_info['duration_ms']) > 500: # Если разница более 500 мс
-            logging.warning(f"Длительности файлов существенно различаются: {ref_info['duration_sec']:.3f}s vs {input_info['duration_sec']:.3f}s")
+        if abs(reference_file_info['duration_ms'] - original_input_file_info['duration_ms']) > 500: # Если разница более 500 мс
+            logging.warning(f"Длительности файлов существенно различаются: {reference_file_info['duration_sec']:.3f}s vs {original_input_file_info['duration_sec']:.3f}s")
             logging.warning("Для обработки будет использована минимальная длина")
         else:
-            logging.info(f"Длительности файлов примерно совпадают (разница {abs(ref_info['duration_ms'] - input_info['duration_ms']):.2f} мс)")
-        
-        # Чтение данных
-        with wave.open(reference_file, 'rb') as ref_wf:
-            ref_data = ref_wf.readframes(ref_wf.getnframes())
-            ref_frames_count = ref_wf.getnframes()
-            ref_rate = ref_wf.getframerate()
-            ref_duration_ms = ref_frames_count * 1000 / ref_rate
+            logging.info(f"Длительности файлов примерно совпадают (разница {abs(reference_file_info['duration_ms'] - original_input_file_info['duration_ms']):.2f} мс)")
 
-        with wave.open(input_file, 'rb') as in_wf:
-            in_data = in_wf.readframes(in_wf.getnframes())
-            in_frames_count = in_wf.getnframes()
-            in_rate = in_wf.getframerate()
-            in_duration_ms = in_frames_count * 1000 / in_rate
-        
-        # Преобразуем байты в NumPy массивы
-        ref_np = np.frombuffer(ref_data, dtype=np.int16)
-        in_np = np.frombuffer(in_data, dtype=np.int16)
-        
         # Настраиваем AEC и масштабируем сигналы
-        frame_size = int(sample_rate * frame_size_ms / 1000)
+        frame_size = int(frame_rate * frame_size_ms / 1000)
         
         # Инициализация сессии AEC
         aec_session = WebRTCAECSession(
-            session_id=f"batch_{os.path.basename(input_file)}",
-            sample_rate=sample_rate,
-            channels=channels,
+            session_id=f"batch_{os.path.basename(original_input_file_info['file_path'])}",
+            frame_rate=frame_rate,
+            n_channels=n_channels,
             batch_mode=True,
             frame_size_ms=frame_size_ms
         )
         
         # Оценка и установка задержки
-        delay_samples, delay_ms, confidence = aec_session.auto_set_delay(ref_data, in_data, actual_delay_ms=0)
+        delay_samples, delay_ms, confidence = aec_session.auto_set_delay(
+            reference_file_info['raw_frames'],
+            original_input_file_info['raw_frames'],
+            actual_delay_ms=0,
+        )
         logging.info(f"Обнаружена задержка: {delay_samples} семплов ({delay_ms:.2f} мс), уверенность: {confidence:.4f}")
         
         # Получаем данные корреляции из последнего вычисления, если такой метод существует
@@ -314,12 +223,18 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         aec_session.optimize_for_best_quality()
         
         # Подготовка к пофреймовой обработке
-        frame_size_bytes = frame_size * 2 * channels  # 2 байта на сэмпл (16 бит)
+        frame_size_bytes = frame_size * 2 * n_channels  # 2 байта на сэмпл (16 бит)
         
         # Разделение на фреймы
-        ref_frames = [ref_data[i:i+frame_size_bytes] for i in range(0, len(ref_data), frame_size_bytes)]
-        in_frames = [in_data[i:i+frame_size_bytes] for i in range(0, len(in_data), frame_size_bytes)]
-        
+        ref_frames = [
+            reference_file_info['raw_frames'][i:i+frame_size_bytes]
+            for i in range(0, len(reference_file_info['raw_frames']), frame_size_bytes)
+        ]
+        in_frames = [
+            original_input_file_info['raw_frames'][i:i+frame_size_bytes]
+            for i in range(0, len(original_input_file_info['raw_frames']), frame_size_bytes)
+        ]
+
         min_frames = min(len(ref_frames), len(in_frames))
         logging.info(f"Количество фреймов: референс={len(ref_frames)}, вход={len(in_frames)}, обработка={min_frames}")
         
@@ -327,23 +242,23 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
         if len(ref_frames) > 0 and len(in_frames) > 0:
             ref_frame_size = len(ref_frames[0])
             in_frame_size = len(in_frames[0])
-            ref_frame_samples = ref_frame_size // (2 * channels)  # 2 байта на сэмпл (16 бит)
-            in_frame_samples = in_frame_size // (2 * channels)
+            ref_frame_samples = ref_frame_size // (2 * n_channels)  # 2 байта на сэмпл (16 бит)
+            in_frame_samples = in_frame_size // (2 * n_channels)
             
             # Информация о размере фреймов
-            logging.info(f"Размер референсного фрейма: {ref_frame_size} байт, {ref_frame_samples} сэмплов, длительность {ref_frame_samples/sample_rate*1000:.2f} мс")
-            logging.info(f"Размер входного фрейма: {in_frame_size} байт, {in_frame_samples} сэмплов, длительность {in_frame_samples/sample_rate*1000:.2f} мс")
+            logging.info(f"Размер референсного фрейма: {ref_frame_size} байт, {ref_frame_samples} сэмплов, длительность {ref_frame_samples/frame_rate*1000:.2f} мс")
+            logging.info(f"Размер входного фрейма: {in_frame_size} байт, {in_frame_samples} сэмплов, длительность {in_frame_samples/frame_rate*1000:.2f} мс")
             
             # Дополнительная информация о первом фрейме каждого типа
             try:
                 ref_frame_np = np.frombuffer(ref_frames[0], dtype=np.int16)
                 in_frame_np = np.frombuffer(in_frames[0], dtype=np.int16)
                 
-                ref_channels_data = ref_frame_np.reshape(-1, channels) if channels > 1 else ref_frame_np
-                in_channels_data = in_frame_np.reshape(-1, channels) if channels > 1 else in_frame_np
+                ref_channels_data = ref_frame_np.reshape(-1, n_channels) if n_channels > 1 else ref_frame_np
+                in_channels_data = in_frame_np.reshape(-1, n_channels) if n_channels > 1 else in_frame_np
                 
                 # Информация о каналах
-                if channels > 1:
+                if n_channels > 1:
                     ref_ch1_min, ref_ch1_max = np.min(ref_channels_data[:,0]), np.max(ref_channels_data[:,0])
                     ref_ch2_min, ref_ch2_max = np.min(ref_channels_data[:,1]), np.max(ref_channels_data[:,1])
                     in_ch1_min, in_ch1_max = np.min(in_channels_data[:,0]), np.max(in_channels_data[:,0])
@@ -412,8 +327,8 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                 
                 # Если это первый фрейм, добавим более подробную информацию
                 if i == 0:
-                    if channels > 1:
-                        proc_channels_data = proc_data_np.reshape(-1, channels)
+                    if n_channels > 1:
+                        proc_channels_data = proc_data_np.reshape(-1, n_channels)
                         proc_ch1_min, proc_ch1_max = np.min(proc_channels_data[:,0]), np.max(proc_channels_data[:,0])
                         proc_ch2_min, proc_ch2_max = np.min(proc_channels_data[:,1]), np.max(proc_channels_data[:,1])
                         logging.info(f"Обработанный фрейм: Канал 1 [мин={proc_ch1_min}, макс={proc_ch1_max}], Канал 2 [мин={proc_ch2_min}, макс={proc_ch2_max}]")
@@ -440,14 +355,20 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
             logging.info(f"Фреймов с обнаруженным эхо: {echo_frames} ({echo_percentage:.2f}%)")
         
         # Сохраняем обработанный сигнал
-        with wave.open(output_file, 'wb') as out_wf:
-            out_wf.setnchannels(in_channels)
+        with wave.open(processed_file_path, 'wb') as out_wf:
+            out_wf.setnchannels(original_input_file_info['n_channels'])
             out_wf.setsampwidth(2)  # 16 бит = 2 байта
-            out_wf.setframerate(in_rate)
+            out_wf.setframerate(original_input_file_info['frame_rate'])
             out_wf.writeframes(processed_data)
             
-        logging.info(f"Обработанный файл сохранен как {output_file}")
-        
+        logging.info(f"Обработанный файл сохранен как {processed_file_path}")
+
+        logging.info("\n>>> Анализ файла с обработанным аудио <<<")
+        processed_file_info = log_file_info(processed_file_path, "Файл с обработанным аудио")
+        if not processed_file_info:
+            logging.error(f"Не удалось получить информацию о файле с обработанным аудио {processed_file_path}")
+            return {}
+
         # Расчёт основных метрик
         metrics = {
             "echo_frames": final_stats.get("echo_frames", 0),
@@ -478,57 +399,17 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                 
                 # Создаем директорию для результатов, если ее нет
                 os.makedirs(output_dir, exist_ok=True)
-                
-                # Логируем частоту дискретизации всех файлов
-                logging.info("=== Проверка частоты дискретизации файлов ===")
-                
-                # Проверяем основные файлы
-                logging.info(f"Используемая частота дискретизации для визуализации: {sample_rate} Гц")
-                # Проверяем reference.wav
-                ref_file = os.path.join(os.path.dirname(reference_file), "reference.wav")
-                if os.path.exists(ref_file):
-                    with wave.open(ref_file, 'rb') as wf:
-                        logging.info(f"reference.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
-
-                # Проверяем reference_by_micro_volumed.wav
-                ref_vol_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed.wav")
-                if os.path.exists(ref_vol_file):
-                    with wave.open(ref_vol_file, 'rb') as wf:
-                        logging.info(f"reference_by_micro_volumed.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
-                
-                # Проверяем reference_by_micro_volumed_delayed.wav
-                ref_delayed_file = os.path.join(os.path.dirname(reference_file), "reference_by_micro_volumed_delayed.wav")
-                if os.path.exists(ref_delayed_file):
-                    with wave.open(ref_delayed_file, 'rb') as wf:
-                        logging.info(f"reference_by_micro_volumed_delayed.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
-                
-                # Проверяем original_input.wav
-                orig_input_file = os.path.join(os.path.dirname(input_file), "original_input.wav")
-                if os.path.exists(orig_input_file):
-                    with wave.open(orig_input_file, 'rb') as wf:
-                        logging.info(f"original_input.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
-                
-                # Проверяем my_voice.wav
-                my_voice_file = os.path.join(os.path.dirname(input_file), "my_voice.wav")
-                if os.path.exists(my_voice_file):
-                    with wave.open(my_voice_file, 'rb') as wf:
-                        logging.info(f"my_voice.wav: {wf.getframerate()} Гц, {wf.getnchannels()} канала(ов)")
 
                 # Затем вызываем visualize_audio_processing
                 visualize_audio_processing(
                     output_dir=output_dir,
-                    reference_data=ref_data,
-                    reference_file_path=ref_file,
-                    reference_by_micro_volumed_data=ref_vol_data,
-                    reference_by_micro_volumed_file_path=ref_vol_file,
-                    reference_by_micro_volumed_delayed_data=ref_delayed_data,
-                    reference_by_micro_volumed_delayed_file_path=reference_delayed_file,
-                    input_data=in_data,
-                    input_file_path=input_file,
-                    processed_data=processed_data,
-                    processed_file_path=output_file,
-                    sample_rate=sample_rate,
-                    channels=channels,
+                    reference_file_info=reference_file_info,
+                    reference_by_micro_volumed_file_info=reference_by_micro_volumed_file_info,
+                    reference_by_micro_volumed_delayed_file_info=reference_by_micro_volumed_delayed_file_info,
+                    original_input_file_info=original_input_file_info,
+                    processed_file_info=processed_file_info,
+                    frame_rate=frame_rate,
+                    n_channels=n_channels,
                     metrics=metrics  # передаем метрики с данными корреляции
                 )
                 
@@ -540,12 +421,174 @@ def process_audio_with_aec(input_file, output_file, reference_file, sample_rate=
                 logging.error(f"Ошибка при создании визуализаций: {e}")
                 logging.exception("Подробная информация об ошибке:")
 
-        return metrics
+        return metrics, processed_file_info
         
     except Exception as e:
         logging.error(f"Ошибка при обработке с AEC: {e}")
         logging.exception("Подробная информация об ошибке:")
         return {}
+
+def extract_audio_file_info(base_path, audio_file_name: str, description: str = "") -> Dict[str, Any]:
+        logging.info(f"\n>>> Анализ файла: {description} <<<")
+        audio_file_path = os.path.join(base_path, audio_file_name)        
+        audio_file_info = {}
+        if os.path.exists(audio_file_path):
+            audio_file_info = log_file_info(audio_file_path, description)
+        else:
+            logging.error(f"Файл {audio_file_path} не найден")
+
+        return audio_file_info
+
+def validate_audio_files(
+    reference_file_info,
+    original_input_file_info,
+    reference_by_micro_volumed_file_info,
+    reference_by_micro_volumed_delayed_file_info
+):
+    """
+    Проверяет совместимость критически важных параметров аудиофайлов для алгоритма AEC.
+    
+    Args:
+        reference_file_info: Информация о референсном файле
+        original_input_file_info: Информация о входном файле
+        reference_by_micro_volumed_file_info: Информация о референсном файле с измененной громкостью
+        reference_by_micro_volumed_delayed_file_info: Информация о задержанном референсном файле
+    
+    Returns:
+        bool: True если параметры совместимы, False в противном случае
+    """
+    logging.info("=== Валидация параметров аудиофайлов ===")
+    
+    # Словарь для хранения общих проблем
+    validation_issues = {
+        "critical": [],    # Критические проблемы, делающие обработку невозможной
+        "warnings": [],    # Предупреждения, обработка возможна, но с искажениями
+        "info": []         # Информационные сообщения
+    }
+    
+    # 1. Проверка частоты дискретизации (sample rate / frame rate)
+    frame_rates = [
+        reference_file_info['frame_rate'],
+        original_input_file_info['frame_rate'],
+        reference_by_micro_volumed_file_info['frame_rate'],
+        reference_by_micro_volumed_delayed_file_info['frame_rate']
+    ]
+    
+    if len(set(frame_rates)) > 1:
+        validation_issues["critical"].append(f"Частоты дискретизации не совпадают: {frame_rates}")
+    else:
+        validation_issues["info"].append(f"Частоты дискретизации совпадают: {frame_rates[0]} Гц")
+    
+    # 2. Проверка разрядности (sample width)
+    sample_widths = [
+        reference_file_info['sample_width'],
+        original_input_file_info['sample_width'],
+        reference_by_micro_volumed_file_info['sample_width'],
+        reference_by_micro_volumed_delayed_file_info['sample_width']
+    ]
+    
+    if len(set(sample_widths)) > 1:
+        validation_issues["critical"].append(f"Разрядности не совпадают: {sample_widths}. Возможны искажения.")
+    else:
+        validation_issues["info"].append(f"Разрядности совпадают: {sample_widths[0]} байт")
+    
+    # 3. Проверка количества каналов
+    channels = [
+        reference_file_info['n_channels'],
+        original_input_file_info['n_channels'],
+        reference_by_micro_volumed_file_info['n_channels'],
+        reference_by_micro_volumed_delayed_file_info['n_channels']
+    ]
+    
+    if len(set(channels)) > 1:
+        validation_issues["critical"].append(f"Количество каналов отличается: {channels}")
+    else:
+        validation_issues["info"].append(f"Количество каналов совпадает: {channels[0]}")
+    
+    # 4. Проверка длительности
+    # Допустимая разница в длительности (1500 мс)
+    duration_threshold_ms = 1500
+    
+    # Проверка между входным файлом и референсным
+    ref_in_duration_diff = abs(reference_file_info['duration_ms'] - original_input_file_info['duration_ms'])
+    if ref_in_duration_diff > duration_threshold_ms:
+        validation_issues["warnings"].append(
+            f"Существенная разница в длительности между референсным и входным файлами: "
+            f"{ref_in_duration_diff:.2f} мс > {duration_threshold_ms} мс"
+        )
+    
+    # Проверка разницы длительности между обычным и задержанным референсным файлами
+    # Это нормально если задержанный файл длиннее
+    ref_delayed_diff = reference_by_micro_volumed_delayed_file_info['duration_ms'] - reference_by_micro_volumed_file_info['duration_ms']
+    expected_diff_threshold = 1000  # Ожидаем задержку не более 1000 мс
+    
+    if ref_delayed_diff < 0:
+        validation_issues["warnings"].append(
+            f"Задержанный референсный файл короче обычного: {ref_delayed_diff:.2f} мс"
+        )
+    elif ref_delayed_diff > expected_diff_threshold:
+        validation_issues["info"].append(
+            f"Задержка между референсными файлами: {ref_delayed_diff:.2f} мс (> {expected_diff_threshold} мс)"
+        )
+    else:
+        validation_issues["info"].append(
+            f"Задержка между референсными файлами: {ref_delayed_diff:.2f} мс"
+        )
+    
+    # 5. Проверка амплитудных характеристик, если доступны
+    has_amplitude_stats = all('amplitude_stats' in file_info for file_info in [
+        reference_file_info, original_input_file_info, 
+        reference_by_micro_volumed_file_info, reference_by_micro_volumed_delayed_file_info
+    ])
+    
+    if has_amplitude_stats:
+        # Проверяем отношение RMS между оригинальным и измененным референсным файлами
+        ref_rms = reference_file_info['amplitude_stats'][0]['rms']
+        ref_vol_rms = reference_by_micro_volumed_file_info['amplitude_stats'][0]['rms']
+        vol_ratio = ref_vol_rms / ref_rms if ref_rms > 0 else 0
+        
+        # Проверяем, находится ли соотношение громкости в ожидаемом диапазоне (0.1-10)
+        if vol_ratio < 0.1 or vol_ratio > 10:
+            validation_issues["warnings"].append(
+                f"Необычное соотношение громкости между референсным и измененным референсным: {vol_ratio:.2f}x"
+            )
+        else:
+            validation_issues["info"].append(
+                f"Соотношение громкости между референсным и измененным: {vol_ratio:.2f}x"
+            )
+        
+        # Проверяем, имеют ли файлы разумный динамический диапазон
+        for idx, file_info in enumerate([reference_file_info, original_input_file_info, 
+                                     reference_by_micro_volumed_file_info, 
+                                     reference_by_micro_volumed_delayed_file_info]):
+            file_name = ["референсный", "входной", "референсный с громкостью", "задержанный референсный"][idx]
+            rms = file_info['amplitude_stats'][0]['rms']
+            if rms < 100:  # Очень тихий сигнал
+                validation_issues["warnings"].append(
+                    f"Очень тихий сигнал в {file_name} файле: RMS={rms:.2f}"
+                )
+    
+    # Вывод результатов проверки
+    if validation_issues["critical"]:
+        logging.error("Критические проблемы совместимости аудиофайлов:")
+        for issue in validation_issues["critical"]:
+            logging.error(f"  ● {issue}")
+        logging.error("Обработка может не дать корректных результатов!")
+    
+    if validation_issues["warnings"]:
+        logging.warning("Предупреждения о совместимости аудиофайлов:")
+        for issue in validation_issues["warnings"]:
+            logging.warning(f"  ● {issue}")
+    
+    if validation_issues["info"]:
+        logging.info("Информация о совместимости аудиофайлов:")
+        for issue in validation_issues["info"]:
+            logging.info(f"  ● {issue}")
+    
+    # Если есть критические проблемы, возвращаем False
+    success = len(validation_issues["critical"]) == 0
+    logging.info(f"Валидация {'успешно завершена' if success else 'не пройдена'}")
+    return success
 
 def process_test_directory(dir_path, output_dir=None, frame_size_ms=10.0, visualize=True, verbose=False):
     """
@@ -585,79 +628,51 @@ def process_test_directory(dir_path, output_dir=None, frame_size_ms=10.0, visual
     logging.info(f"Начало обработки директории: {dir_path}")
     logging.info(f"Результаты будут сохранены в: {output_dir}")
     
-    # Проверяем наличие необходимых файлов
-    reference_file = os.path.join(dir_path, "reference.wav")
-    input_file = os.path.join(dir_path, "original_input.wav")
-    
-    if not os.path.exists(reference_file):
-        logging.error(f"Файл {reference_file} не найден")
+    # Используем utils.py для подробного анализа всех WAV файлов
+    logging.info("\n=== Детальный анализ входных файлов ===")
+
+    # Проверяем наличие необходимых файлов    
+    reference_file_info = extract_audio_file_info(dir_path, "reference.wav", description="Референсный файл")
+    original_input_file_info = extract_audio_file_info(dir_path, "original_input.wav", description="Входной файл")
+    reference_by_micro_volumed_file_info = extract_audio_file_info(dir_path, "reference_by_micro_volumed.wav", description="Файл с референсным аудио на входе в микрофон (с измененной громкостью)")
+    reference_by_micro_volumed_delayed_file_info = extract_audio_file_info(dir_path, "reference_by_micro_volumed_delayed.wav", description="Файл с референсным аудио на входе в микрофон (с измененной громкостью и задержкой)")
+
+    if not validate_audio_files(
+        reference_file_info,
+        original_input_file_info,
+        reference_by_micro_volumed_file_info,
+        reference_by_micro_volumed_delayed_file_info
+    ):
+        logging.error("Ошибка валидации аудиофайлов. Проверьте файлы и повторите попытку.")
         return None
-    
-    if not os.path.exists(input_file):
-        logging.error(f"Файл {input_file} не найден")
-        return None
-    
+
     # Определяем имя выходного файла
-    output_file = os.path.join(output_dir, "processed_input.wav")
-    
-    # Обрабатываем файлы с помощью AEC
-    logging.info(f"Обработка директории: {dir_path}")
-    logging.info(f"Референсный файл: {reference_file}")
-    logging.info(f"Входной файл: {input_file}")
-    logging.info(f"Выходной файл: {output_file}")
-    
-    # Получаем длительность входного файла для проверки после обработки
-    input_duration = 0
-    try:
-        with wave.open(input_file, 'rb') as wf:
-            input_frames = wf.getnframes()
-            input_rate = wf.getframerate()
-            input_duration = input_frames / input_rate
-            input_duration_ms = input_frames * 1000 / input_rate
-            logging.info(f"Длительность входного файла: {input_duration_ms:.2f} мс ({input_duration:.2f} с)")
-    except Exception as e:
-        logging.error(f"Ошибка при чтении входного файла: {e}")
+    processed_file_path = os.path.join(output_dir, "processed_input.wav")
     
     # Запускаем обработку с помощью AEC
     try:
-        # Определяем sample_rate и channels из входного файла
-        with wave.open(input_file, 'rb') as wf:
-            sample_rate = wf.getframerate()
-            channels = wf.getnchannels()
-            logging.info(f"Параметры аудио: {sample_rate}Hz, {channels} каналов")
-        
         # Обрабатываем аудио с нашей оптимизированной функцией
-        metrics = process_audio_with_aec(
-            input_file,
-            output_file,
-            reference_file,
-            sample_rate=sample_rate,
-            channels=channels,
+        metrics, processed_file_info = process_audio_with_aec(
+            processed_file_path,
+            reference_file_info,
+            original_input_file_info,
+            reference_by_micro_volumed_file_info,
+            reference_by_micro_volumed_delayed_file_info,
+            frame_rate=original_input_file_info['frame_rate'],
+            n_channels=original_input_file_info['n_channels'],
             visualize=visualize,
             output_dir=output_dir,
             frame_size_ms=frame_size_ms
         )
-        
+
         # Проверяем длительность выходного файла
-        if os.path.exists(output_file):
-            try:
-                with wave.open(output_file, 'rb') as wf:
-                    output_frames = wf.getnframes()
-                    output_rate = wf.getframerate()
-                    output_duration = output_frames / output_rate
-                    output_duration_ms = output_frames * 1000 / output_rate
-                    logging.info(f"Длительность выходного файла: {output_duration_ms:.2f} мс ({output_duration:.2f} с)")
-                    
-                    # Проверяем, не сильно ли отличается длительность
-                    if input_duration > 0 and abs(output_duration - input_duration) > 0.5:  # допуск 0.5 сек
-                        logging.warning(f"Длительность выходного файла ({output_duration_ms:.2f} мс) существенно отличается от входного ({input_duration_ms:.2f} мс)")
-                        if output_duration < input_duration * 0.8:  # если выходной файл меньше 80% входного
-                            logging.error("Выходной файл значительно короче входного. Возможно, обработка была прервана!")
-            except Exception as e:
-                logging.error(f"Ошибка при проверке выходного файла: {e}")
+        if os.path.exists(processed_file_path):                    
+            # Проверяем, не сильно ли отличается длительность
+            if abs(processed_file_info['duration_sec'] - original_input_file_info['duration_sec']) > 0.5:  # допуск 0.5 сек
+                logging.warning(f"Длительность выходного файла ({processed_file_info['duration_ms']:.2f} мс) существенно отличается от входного ({original_input_file_info['duration_ms']:.2f} мс)")
         else:
-            logging.error(f"Выходной файл {output_file} не был создан!")
-        
+            logging.error(f"Выходной файл {processed_file_path} не был создан!")
+
         # Сохраняем метрики в JSON файл
         metrics_file = os.path.join(output_dir, "aec_metrics.json")
         with open(metrics_file, 'w') as f:
@@ -771,40 +786,6 @@ def process_test_directories(args):
         except Exception as e:
             logging.error(f"Ошибка при сохранении сводных результатов: {e}")
 
-def process_single_directory(test_dir, args):
-    """
-    Обрабатывает одну конкретную тестовую директорию.
-    
-    Args:
-        test_dir: Путь к тестовой директории
-        args: Аргументы командной строки
-    """
-    try:
-        # Проверяем наличие необходимых файлов
-        reference_file = os.path.join(test_dir, "reference.wav")
-        input_file = os.path.join(test_dir, "original_input.wav")
-        reference_delayed_file = os.path.join(test_dir, "reference_by_micro_volumed_delayed.wav")
-        
-        if not os.path.exists(reference_file):
-            logging.warning(f"Файл {reference_file} не найден, пропускаем директорию")
-            return
-            
-        if not os.path.exists(input_file):
-            logging.warning(f"Файл {input_file} не найден, пропускаем директорию")
-            return
-        
-        # Определяем директорию для результатов
-        results_dir = args.results_dir if args.results_dir else test_dir
-        
-        # Запускаем обработку для этой директории
-        process_test_directory(test_dir, results_dir, args.frame_size_ms, args.visualize, args.verbose)
-        
-        logging.info(f"Обработка директории {test_dir} завершена")
-        
-    except Exception as e:
-        logging.error(f"Ошибка при обработке директории {test_dir}: {e}")
-        logging.exception("Подробная информация об ошибке:")
-
 def process_directory_by_level(dir_path, args):
     """
     Определяет уровень вложенности тестовой директории и обрабатывает её соответствующим образом.
@@ -898,10 +879,10 @@ def process_directory_by_level(dir_path, args):
         logging.warning("Попытка обработать как обычную тестовую директорию")
         
         # Проверяем наличие необходимых файлов
-        reference_file = os.path.join(dir_path, "reference.wav")
-        input_file = os.path.join(dir_path, "original_input.wav")
+        reference_file_path_path = os.path.join(dir_path, "reference.wav")
+        original_input_file_path = os.path.join(dir_path, "original_input.wav")
         
-        if os.path.exists(reference_file) and os.path.exists(input_file):
+        if os.path.exists(reference_file_path) and os.path.exists(original_input_file_path):
             logging.info(f"Найдены необходимые файлы в директории {dir_path}, обрабатываем")
             # Всегда сохраняем результаты в исходной директории
             output_dir = dir_path

@@ -32,11 +32,11 @@ def get_wav_info(file_path: str) -> Dict[str, Any]:
         with wave.open(file_path, 'rb') as wf:
             n_channels = wf.getnchannels()
             sample_width = wf.getsampwidth()
-            framerate = wf.getframerate()
+            frame_rate = wf.getframerate()
             n_frames = wf.getnframes()
             
             # Вычисляем длительность в миллисекундах
-            duration_ms = n_frames * 1000 / framerate
+            duration_ms = n_frames * 1000 / frame_rate
             
             # Добавляем размер файла
             file_size_kb = os.path.getsize(file_path) / 1024
@@ -49,7 +49,7 @@ def get_wav_info(file_path: str) -> Dict[str, Any]:
                 'n_channels': n_channels,
                 'sample_width': sample_width,
                 'sample_width_bits': sample_width * 8,
-                'framerate': framerate,
+                'frame_rate': frame_rate,
                 'n_frames': n_frames,
                 'duration_ms': duration_ms,
                 'duration_sec': duration_ms / 1000,
@@ -101,7 +101,7 @@ def get_wav_info(file_path: str) -> Dict[str, Any]:
             'n_channels': 1,
             'sample_width': 2,
             'sample_width_bits': 16,
-            'framerate': 16000,
+            'frame_rate': 16000,
             'n_frames': 0,
             'duration_ms': 0,
             'duration_sec': 0,
@@ -109,7 +109,7 @@ def get_wav_info(file_path: str) -> Dict[str, Any]:
         }
 
 
-def log_file_info(file_path: str, description: str = "") -> Tuple[Optional[Dict[str, Any]], Optional[int]]:
+def log_file_info(file_path: str, description: str = "") -> Optional[Dict[str, Any]]:
     """
     Логирует информацию о WAV файле и возвращает информацию о нём.
     
@@ -126,15 +126,18 @@ def log_file_info(file_path: str, description: str = "") -> Tuple[Optional[Dict[
     logging.info(f"File info: {description}: {file_path}")
     file_info = get_wav_info(file_path)
     
-    logging.info(f"  Частота дискретизации: {file_info['framerate']} Гц")
+    logging.info(f"  Частота дискретизации: {file_info['frame_rate']} Гц")
     logging.info(f"  Длительность: {file_info['duration_sec']:.3f} сек")
     logging.info(f"  Каналов: {file_info['n_channels']}")
     if 'amplitude_stats' in file_info and file_info['amplitude_stats']:
         for stats in file_info['amplitude_stats']:
             logging.info(f"  Канал {stats['channel']}: мин={stats['min']:.6f}, макс={stats['max']:.6f}, RMS={stats['rms']:.6f}")
     
-    return file_info, file_info['n_channels']
+    return file_info
 
+def log_audio_files(files: List[Tuple[str, str]]):
+    for file_path, description in files:
+        file_info = log_file_info(file_path, description)
 
 def get_wav_amplitude_stats(file_path: str) -> Optional[List[Dict[str, Any]]]:
     """
@@ -172,7 +175,7 @@ def format_wav_info(file_info: Dict[str, Any]) -> str:
     result.append(f"Путь к файлу: {file_info.get('file_path', 'Не указан')}")
     result.append(f"Количество каналов: {file_info.get('n_channels', 'Неизвестно')}")
     result.append(f"Битность: {file_info.get('sample_width', 'Неизвестно')} байт ({file_info.get('sample_width_bits', 'Неизвестно')} бит)")
-    result.append(f"Частота дискретизации: {file_info.get('framerate', 'Неизвестно')} Гц")
+    result.append(f"Частота дискретизации: {file_info.get('frame_rate', 'Неизвестно')} Гц")
     result.append(f"Количество фреймов: {file_info.get('n_frames', 'Неизвестно')}")
     result.append(f"Длительность: {file_info.get('duration_sec', 0):.3f} секунд ({file_info.get('duration_ms', 0):.1f} мс)")
     result.append(f"Размер файла: {file_info.get('file_size_kb', 0):.2f} КБ")

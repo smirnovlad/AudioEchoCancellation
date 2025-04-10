@@ -30,7 +30,7 @@ class WebRTCAECSession:
     2. Пакетный режим (устаревший) - сначала обрабатываются все референсные фреймы, затем все входные
     """
     
-    def __init__(self, session_id: str, sample_rate: int = 16000, channels: int = 1, 
+    def __init__(self, session_id: str, frame_rate: int = 16000, n_channels: int = 1, 
                  webrtc_mode: bool = True, batch_mode: bool = False, system_delay: int = 0,
                  input_scale_factor: float = 1.0, reference_scale_factor: float = 1.0, scaling_enabled=False,
                  frame_size_ms: float = 10.0):
@@ -39,8 +39,8 @@ class WebRTCAECSession:
         
         Args:
             session_id: Уникальный идентификатор сессии
-            sample_rate: Частота дискретизации в Гц (по умолчанию 16000)
-            channels: Количество аудиоканалов (по умолчанию 1)
+            frame_rate: Частота дискретизации в Гц (по умолчанию 16000)
+            n_channels: Количество аудиоканалов (по умолчанию 1)
             webrtc_mode: Использовать WebRTC AEC (True) или заглушку (False)
             batch_mode: Использовать пакетный режим обработки (устаревший)
             system_delay: Системная задержка в сэмплах (по умолчанию 0)
@@ -50,15 +50,15 @@ class WebRTCAECSession:
             frame_size_ms: Размер фрейма в миллисекундах (по умолчанию 10.0 мс)
         """
         self.session_id = session_id
-        self.sample_rate = sample_rate
-        self.channels = channels
+        self.frame_rate = frame_rate
+        self.n_channels = n_channels
         self.input_scale_factor = input_scale_factor
         self.reference_scale_factor = reference_scale_factor
         self.scaling_enabled = scaling_enabled
         self.frame_size_ms = frame_size_ms
         
         # Логируем входные параметры
-        logging.info(f"Инициализация WebRTCAECSession: session_id={session_id}, sample_rate={sample_rate}, channels={channels}, webrtc_mode={webrtc_mode}, batch_mode={batch_mode}, system_delay={system_delay}")
+        logging.info(f"Инициализация WebRTCAECSession: session_id={session_id}, frame_rate={frame_rate}, n_channels={n_channels}, webrtc_mode={webrtc_mode}, batch_mode={batch_mode}, system_delay={system_delay}")
         logging.info(f"WEBRTC_AVAILABLE = {WEBRTC_AVAILABLE}")
         logging.info(f"Автоматическое масштабирование: {'ВКЛЮЧЕНО' if scaling_enabled else 'ВЫКЛЮЧЕНО'}")
         logging.info(f"Размер фрейма: {frame_size_ms} мс")
@@ -87,7 +87,7 @@ class WebRTCAECSession:
         self.reference_frames = []
         
         # Размер фрейма в сэмплах (frame_size_ms мс при заданной частоте дискретизации)
-        self.frame_size = int(self.sample_rate * self.frame_size_ms / 1000)
+        self.frame_size = int(self.frame_rate * self.frame_size_ms / 1000)
         logging.info(f"Инициализация WebRTC AEC сессии {session_id}, размер фрейма: {self.frame_size} сэмплов ({self.frame_size_ms} мс)")
         
         if self.webrtc_mode:
@@ -128,16 +128,16 @@ class WebRTCAECSession:
                 
                 # Установка формата потока (частота дискретизации, количество каналов)
                 self.apm.set_stream_format(
-                    self.sample_rate,
-                    self.channels,
-                    self.sample_rate,
-                    self.channels
+                    self.frame_rate,
+                    self.n_channels,
+                    self.frame_rate,
+                    self.n_channels
                 )
                 
                 # Установка формата обратного потока (референсный сигнал)
                 self.apm.set_reverse_stream_format(
-                    self.sample_rate,
-                    self.channels
+                    self.frame_rate,
+                    self.n_channels
                 )
                 
                 # Проверяем доступные возможности APM
@@ -168,8 +168,8 @@ class WebRTCAECSession:
         try:
             # Логируем размер фрейма
             frame_size_bytes = len(frame_bytes)
-            frame_size_samples = frame_size_bytes // (2 * self.channels)  # 2 байта на сэмпл (16 бит)
-            frame_size_ms = frame_size_samples / self.sample_rate * 1000
+            frame_size_samples = frame_size_bytes // (2 * self.n_channels)  # 2 байта на сэмпл (16 бит)
+            frame_size_ms = frame_size_samples / self.frame_rate * 1000
             
             logging.info(f"Референсный фрейм: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
             
@@ -202,7 +202,7 @@ class WebRTCAECSession:
             else:
                 # В режиме реального времени сразу обрабатываем фрейм
                 # Проверяем размер фрейма
-                expected_size = self.frame_size * 2 * self.channels  # в байтах
+                expected_size = self.frame_size * 2 * self.n_channels  # в байтах
                 
                 if frame_size_bytes != expected_size:
                     logging.warning(f"Размер референсного фрейма ({frame_size_bytes} байт, {frame_size_ms:.2f} мс) не соответствует ожидаемому ({expected_size} байт, {self.frame_size_ms} мс)")
@@ -213,8 +213,8 @@ class WebRTCAECSession:
                         for i in range(0, frame_size_bytes, expected_size):
                             if i + expected_size <= frame_size_bytes:
                                 chunk = frame_bytes[i:i+expected_size]
-                                chunk_samples = len(chunk) // (2 * self.channels)
-                                chunk_ms = chunk_samples / self.sample_rate * 1000
+                                chunk_samples = len(chunk) // (2 * self.n_channels)
+                                chunk_ms = chunk_samples / self.frame_rate * 1000
                                 logging.info(f"Обработка части референсного фрейма: {chunk_samples} сэмплов, {len(chunk)} байт, {chunk_ms:.2f} мс")
                                 
                                 # Используем process_reverse_stream из audio_processing.h
@@ -289,8 +289,8 @@ class WebRTCAECSession:
         try:
             # Логируем размер фрейма
             frame_size_bytes = len(frame_bytes)
-            frame_size_samples = frame_size_bytes // (2 * self.channels)  # 2 байта на сэмпл (16 бит)
-            frame_size_ms = frame_size_samples / self.sample_rate * 1000
+            frame_size_samples = frame_size_bytes // (2 * self.n_channels)  # 2 байта на сэмпл (16 бит)
+            frame_size_ms = frame_size_samples / self.frame_rate * 1000
             
             logging.info(f"Входной фрейм: {frame_size_samples} сэмплов, {frame_size_bytes} байт, {frame_size_ms:.2f} мс")
             
@@ -322,7 +322,7 @@ class WebRTCAECSession:
                 self._process_reference_frames_batch(input_array)
                 
                 # Затем обрабатываем входной фрейм
-                expected_size = self.frame_size * 2 * self.channels  # в байтах
+                expected_size = self.frame_size * 2 * self.n_channels  # в байтах
                 
                 if frame_size_bytes != expected_size:
                     # Обработка фреймов нестандартного размера
@@ -333,7 +333,7 @@ class WebRTCAECSession:
                     processed_bytes = self.apm.process_stream(frame_bytes)
             else:
                 # В режиме реального времени обрабатываем фрейм напрямую
-                expected_size = self.frame_size * 2 * self.channels  # в байтах
+                expected_size = self.frame_size * 2 * self.n_channels  # в байтах
                 
                 if frame_size_bytes != expected_size:
                     logging.warning(f"Размер входного фрейма ({frame_size_bytes} байт, {frame_size_ms:.2f} мс) не соответствует ожидаемому ({expected_size} байт, {self.frame_size_ms} мс)")
@@ -344,8 +344,8 @@ class WebRTCAECSession:
                         for i in range(0, frame_size_bytes, expected_size):
                             if i + expected_size <= frame_size_bytes:
                                 chunk = frame_bytes[i:i+expected_size]
-                                chunk_samples = len(chunk) // (2 * self.channels)
-                                chunk_ms = chunk_samples / self.sample_rate * 1000
+                                chunk_samples = len(chunk) // (2 * self.n_channels)
+                                chunk_ms = chunk_samples / self.frame_rate * 1000
                                 logging.info(f"Обработка части входного фрейма: {chunk_samples} сэмплов, {len(chunk)} байт, {chunk_ms:.2f} мс")
                                 
                                 # Используем process_stream из audio_processing.h
@@ -433,7 +433,7 @@ class WebRTCAECSession:
                         
                         # Логируем размер чанка
                         chunk_bytes = ref_chunk.tobytes()
-                        chunk_ms = len(ref_chunk) / self.sample_rate * 1000
+                        chunk_ms = len(ref_chunk) / self.frame_rate * 1000
                         
                         if ref_idx == 0 and i == 0:  # Логируем только первый чанк для уменьшения объема логов
                             logging.info(f"Пакетный режим: референсный чанк {ref_idx+1}/{len(self.reference_frames)}, позиция {i}: {len(ref_chunk)} сэмплов, {len(chunk_bytes)} байт, {chunk_ms:.2f} мс")
@@ -469,7 +469,7 @@ class WebRTCAECSession:
                 # Добавляем информацию о задержке
                 self.stats["system_delay"] = {
                     "samples": self.system_delay,
-                    "ms": self.system_delay / self.sample_rate * 1000
+                    "ms": self.system_delay / self.frame_rate * 1000
                 }
                 
                 # Дополнительная статистика, если доступна
@@ -521,16 +521,16 @@ class WebRTCAECSession:
                 
                 # Установка формата потока
                 self.apm.set_stream_format(
-                    self.sample_rate,
-                    self.channels,
-                    self.sample_rate,
-                    self.channels
+                    self.frame_rate,
+                    self.n_channels,
+                    self.frame_rate,
+                    self.n_channels
                 )
                 
                 # Установка формата обратного потока
                 self.apm.set_reverse_stream_format(
-                    self.sample_rate,
-                    self.channels
+                    self.frame_rate,
+                    self.n_channels
                 )
                 
                 # Восстанавливаем задержку
@@ -588,7 +588,7 @@ class WebRTCAECSession:
             self.system_delay = delay_samples
             
             # Вычисляем задержку в миллисекундах для логирования
-            delay_ms = delay_samples * 1000 / self.sample_rate
+            delay_ms = delay_samples * 1000 / self.frame_rate
             
             logging.info(f"Установлена системная задержка: {delay_samples} сэмплов ({delay_ms:.2f} мс)")
             return True
@@ -617,15 +617,15 @@ class WebRTCAECSession:
             return False
 
     @staticmethod
-    def get_delay_correlation_data(reference_data: bytes, input_data: bytes, sample_rate: int = 16000, channels: int = 1, max_delay_ms: int = 1000) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def get_delay_correlation_data(reference_data: bytes, input_data: bytes, frame_rate: int = 16000, n_channels: int = 1, max_delay_ms: int = 1000) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Вычисляет данные корреляции между референсным и входным сигналами
         
         Args:
             reference_data: Референсный сигнал (байты)
             input_data: Входной сигнал (байты)
-            sample_rate: Частота дискретизации (Гц)
-            channels: Количество каналов (1 для моно, 2 для стерео)
+            frame_rate: Частота дискретизации (Гц)
+            n_channels: Количество каналов (1 для моно, 2 для стерео)
             max_delay_ms: Максимальная задержка для поиска (мс)
             
         Returns:
@@ -633,14 +633,14 @@ class WebRTCAECSession:
                 (ref_signal_norm, in_signal_norm, correlation, lags) - 
                 нормализованные сигналы, массив корреляции и массив задержек в отсчетах
         """
-        logging.info(f"Вычисление корреляции для определения задержки (каналов: {channels})...")
+        logging.info(f"Вычисление корреляции для определения задержки (каналов: {n_channels})...")
         
         # Преобразуем байты в numpy массивы
         ref_signal = np.frombuffer(reference_data, dtype=np.int16)
         in_signal = np.frombuffer(input_data, dtype=np.int16)
         
         # Если у нас стерео-данные, преобразуем их в правильную форму и берем один канал
-        if channels == 2:
+        if n_channels == 2:
             # Проверяем, что длина массивов четная для стерео данных
             if len(ref_signal) % 2 == 0:
                 ref_signal = ref_signal.reshape(-1, 2)[:, 0]  # Берем только левый канал
@@ -656,7 +656,7 @@ class WebRTCAECSession:
         
         # Ограничиваем длину сигналов для ускорения вычислений
         # Используем первые 5 секунд или меньше, если сигналы короче
-        max_samples = min(5 * sample_rate, len(ref_signal), len(in_signal))
+        max_samples = min(5 * frame_rate, len(ref_signal), len(in_signal))
         ref_signal = ref_signal[:max_samples]
         in_signal = in_signal[:max_samples]
         
@@ -673,15 +673,15 @@ class WebRTCAECSession:
         return ref_signal_norm, in_signal_norm, correlation, lags
 
     @staticmethod
-    def estimate_delay(reference_data: bytes, input_data: bytes, sample_rate: int = 16000, channels: int = 1, max_delay_ms: int = 1000) -> Tuple[int, float, float]:
+    def estimate_delay(reference_data: bytes, input_data: bytes, frame_rate: int = 16000, n_channels: int = 1, max_delay_ms: int = 1000) -> Tuple[int, float, float]:
         """
         Оценивает задержку между референсным и входным сигналами с помощью кросс-корреляции
         
         Args:
             reference_data: Референсный сигнал (байты)
             input_data: Входной сигнал (байты)
-            sample_rate: Частота дискретизации (Гц)
-            channels: Количество каналов (1 для моно, 2 для стерео)
+            frame_rate: Частота дискретизации (Гц)
+            n_channels: Количество каналов (1 для моно, 2 для стерео)
             max_delay_ms: Максимальная задержка для поиска (мс)
             
         Returns:
@@ -689,11 +689,11 @@ class WebRTCAECSession:
         """
         # Используем метод get_delay_correlation_data для получения корреляции
         ref_signal_norm, in_signal_norm, correlation, lags = WebRTCAECSession.get_delay_correlation_data(
-            reference_data, input_data, sample_rate, channels, max_delay_ms
+            reference_data, input_data, frame_rate, n_channels, max_delay_ms
         )
         
         # Вычисляем максимальную задержку в сэмплах
-        max_delay_samples = int(max_delay_ms * sample_rate / 1000)
+        max_delay_samples = int(max_delay_ms * frame_rate / 1000)
         
         # Находим индекс максимальной корреляции
         max_index = np.argmax(correlation)
@@ -705,7 +705,7 @@ class WebRTCAECSession:
         delay_samples = max(0, min(delay_samples, max_delay_samples))
         
         # Вычисляем задержку в мс
-        delay_ms = delay_samples * 1000 / sample_rate
+        delay_ms = delay_samples * 1000 / frame_rate
         
         # Вычисляем уверенность в оценке (нормализованное значение максимума корреляции)
         max_correlation = correlation[max_index]
@@ -730,8 +730,8 @@ class WebRTCAECSession:
         """
         if actual_delay_ms is not None:
             logging.info(f"Установка задержки вручную: {actual_delay_ms} мс")
-            self.set_system_delay(int(actual_delay_ms * self.sample_rate / 1000))
-            delay_samples = int(actual_delay_ms * self.sample_rate / 1000)
+            self.set_system_delay(int(actual_delay_ms * self.frame_rate / 1000))
+            delay_samples = int(actual_delay_ms * self.frame_rate / 1000)
             delay_ms = actual_delay_ms
             confidence = 1.0
 
@@ -744,11 +744,11 @@ class WebRTCAECSession:
         else:
             # Получаем данные корреляции напрямую, чтобы сохранить их для последующего использования
             ref_signal_norm, in_signal_norm, correlation, lags = self.get_delay_correlation_data(
-                reference_data, input_data, self.sample_rate, self.channels, max_delay_ms
+                reference_data, input_data, self.frame_rate, self.n_channels, max_delay_ms
             )
             
             # Вычисляем максимальную задержку в сэмплах
-            max_delay_samples = int(max_delay_ms * self.sample_rate / 1000)
+            max_delay_samples = int(max_delay_ms * self.frame_rate / 1000)
             
             # Находим индекс максимальной корреляции
             max_index = np.argmax(correlation)
@@ -760,7 +760,7 @@ class WebRTCAECSession:
             delay_samples = max(0, min(delay_samples, max_delay_samples))
             
             # Вычисляем задержку в мс
-            delay_ms = delay_samples * 1000 / self.sample_rate
+            delay_ms = delay_samples * 1000 / self.frame_rate
             
             # Вычисляем уверенность в оценке (нормализованное значение максимума корреляции)
             max_correlation = correlation[max_index]
@@ -1069,11 +1069,11 @@ class WebRTCAECManager:
     """
     def __init__(self):
         self.sessions: Dict[str, WebRTCAECSession] = {}
-        self.default_sample_rate = 16000
-        self.default_channels = 1
+        self.default_frame_rate = 16000
+        self.default_n_channels = 1
         logging.info("WebRTCAECManager: initialized")
     
-    def get_or_create_session(self, session_id: str, sample_rate: int = None, channels: int = None,
+    def get_or_create_session(self, session_id: str, frame_rate: int = None, n_channels: int = None,
                               input_scale_factor: float = 1.0, reference_scale_factor: float = 1.0,
                               scaling_enabled: bool = False, frame_size_ms: float = 10.0) -> WebRTCAECSession:
         """
@@ -1081,8 +1081,8 @@ class WebRTCAECManager:
         
         Args:
             session_id: Session identifier
-            sample_rate: Sample rate
-            channels: Number of channels
+            frame_rate: Sample rate
+            n_channels: Number of n_channels
             input_scale_factor: Scale factor for input signal
             reference_scale_factor: Scale factor for reference signal
             scaling_enabled: Enable automatic signal scaling
@@ -1103,13 +1103,13 @@ class WebRTCAECManager:
             return session
             
         # Create a new session
-        sample_rate = sample_rate or self.default_sample_rate
-        channels = channels or self.default_channels
+        frame_rate = frame_rate or self.default_frame_rate
+        n_channels = n_channels or self.default_n_channels
         
         session = WebRTCAECSession(
             session_id=session_id,
-            sample_rate=sample_rate,
-            channels=channels,
+            frame_rate=frame_rate,
+            n_channels=n_channels,
             input_scale_factor=input_scale_factor,
             reference_scale_factor=reference_scale_factor,
             scaling_enabled=scaling_enabled,

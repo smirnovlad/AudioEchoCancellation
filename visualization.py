@@ -8,14 +8,14 @@ from typing import Optional, Tuple, Dict, List, Any
 from utils import log_file_info
 from plot import *
 
-def calculate_signal_delay(in_channel, ref_channel, sample_rate):
+def calculate_signal_delay(in_channel, ref_channel, frame_rate):
     """
     Вычисляет задержку между входным и референсным сигналами.
     
     Args:
         in_channel: Входной сигнал (numpy массив)
         ref_channel: Референсный сигнал (numpy массив)
-        sample_rate: Частота дискретизации
+        frame_rate: Частота дискретизации
         
     Returns:
         tuple: (lag, delay_ms, correlation, lags, confidence) - 
@@ -50,7 +50,7 @@ def calculate_signal_delay(in_channel, ref_channel, sample_rate):
         lag = lags[max_corr_idx]
     
     # Вычисляем задержку в миллисекундах
-    delay_ms = lag * 1000 / sample_rate
+    delay_ms = lag * 1000 / frame_rate
     
     # Вычисляем уверенность (нормализованная корреляция)
     max_corr = np.abs(correlation[max_corr_idx])
@@ -63,14 +63,14 @@ def calculate_signal_delay(in_channel, ref_channel, sample_rate):
     return lag, delay_ms, correlation, lags, confidence
 
 
-def format_array_info(array_name, array, sample_rate):
+def format_array_info(array_name, array, frame_rate):
     """
     Форматирует информацию о массиве аудиоданных в понятное описание.
     
     Args:
         array_name: Название массива
         array: NumPy массив с аудиоданными
-        sample_rate: Частота дискретизации
+        frame_rate: Частота дискретизации
         
     Returns:
         str: Отформатированное описание
@@ -81,15 +81,15 @@ def format_array_info(array_name, array, sample_rate):
     if len(array.shape) > 1:  # Стерео
         format_type = "стерео"
         n_samples = array.shape[0]
-        channels = array.shape[1]
-        shape_str = f"{array.shape} (сэмплов: {n_samples}, каналов: {channels})"
+        n_channels = array.shape[1]
+        shape_str = f"{array.shape} (сэмплов: {n_samples}, каналов: {n_channels})"
     else:  # Моно
         format_type = "моно"
         n_samples = len(array)
         shape_str = f"{array.shape} (сэмплов: {n_samples})"
     
-    duration_sec = n_samples / sample_rate
-    duration_ms = n_samples * 1000 / sample_rate
+    duration_sec = n_samples / frame_rate
+    duration_ms = n_samples * 1000 / frame_rate
     
     return f"{array_name}: {shape_str}, формат: {format_type}, длительность: {duration_sec:.3f} с ({duration_ms:.1f} мс)"
 
@@ -188,21 +188,202 @@ def calculate_and_log_statistics(
     
     return results
 
+def visualize_one_channel(
+    plt_figure,
+    channel_num,
+    num_plots,
+    num_cols,
+    ref_array,
+    ref_by_micro_volumed_array,
+    ref_by_micro_volumed_delayed_array,
+    in_array,
+    processed_array,
+    time_axis_ms,
+    frame_rate,
+    metrics=None,
+    ref_delay_ms=None
+):
+    """
+    Визуализирует графики для одного канала аудио.
+    
+    Args:
+        plt_figure: Matplotlib figure для построения графиков
+        channel_num: Номер канала (1 или 2)
+        num_plots: Общее количество графиков в фигуре
+        num_cols: Количество колонок в фигуре
+        ref_array: Массив оригинального референсного сигнала
+        ref_by_micro_volumed_array: Массив референсного сигнала с измененной громкостью
+        ref_by_micro_volumed_delayed_array: Массив задержанного референсного сигнала
+        in_array: Массив входного сигнала
+        processed_array: Массив обработанного сигнала
+        time_axis_ms: Временная ось в миллисекундах
+        frame_rate: Частота дискретизации
+        metrics: Предварительно рассчитанные метрики (необязательно)
+        ref_delay_ms: Задержка референсного сигнала (опционально)
+    """
+    # Извлекаем данные для конкретного канала
+    if len(ref_array.shape) > 1 and ref_array.shape[1] > channel_num - 1:
+        ref_channel = ref_array[:, channel_num - 1]
+    else:
+        ref_channel = ref_array
+        
+    if len(ref_by_micro_volumed_array.shape) > 1 and ref_by_micro_volumed_array.shape[1] > channel_num - 1:
+        ref_by_micro_volumed_channel = ref_by_micro_volumed_array[:, channel_num - 1]
+    else:
+        ref_by_micro_volumed_channel = ref_by_micro_volumed_array
+        
+    if len(ref_by_micro_volumed_delayed_array.shape) > 1 and ref_by_micro_volumed_delayed_array.shape[1] > channel_num - 1:
+        ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_array[:, channel_num - 1]
+    else:
+        ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_array
+        
+    if len(in_array.shape) > 1 and in_array.shape[1] > channel_num - 1:
+        in_channel = in_array[:, channel_num - 1]
+    else:
+        in_channel = in_array
+        
+    if len(processed_array.shape) > 1 and processed_array.shape[1] > channel_num - 1:
+        processed_channel = processed_array[:, channel_num - 1]
+    else:
+        processed_channel = processed_array
+        
+    # Находим минимальную длину массивов для корректного отображения
+    min_display_length = min(len(ref_channel), len(in_channel), len(processed_channel))
+    
+    # Обрезаем массивы до минимальной длины
+    ref_channel = ref_channel[:min_display_length]
+    in_channel = in_channel[:min_display_length]
+    processed_channel = processed_channel[:min_display_length]
+    ref_by_micro_volumed_channel = ref_by_micro_volumed_channel[:min_display_length]
+    ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_channel[:min_display_length]
+    
+    # Вычисляем задержку между сигналами, если не предоставлены метрики
+    if metrics and all(k in metrics for k in ['delay_samples', 'delay_ms', 'confidence', 'delay_correlation', 'delay_lags']):
+        # Используем предрассчитанные данные
+        lag = metrics['delay_samples']
+        delay_ms = metrics['delay_ms']
+        confidence = metrics['confidence']
+        correlation = metrics['delay_correlation']
+        lags = metrics['delay_lags']
+    else:
+        # Рассчитываем корреляцию для текущего канала
+        lag, delay_ms, correlation, lags, confidence = calculate_signal_delay(in_channel, ref_channel, frame_rate)
+    
+    # Вычисляем позицию в сетке для текущего канала
+    col_offset = channel_num - 1
+    
+    # 1. График двух референсных сигналов на входе в микро (до и после задержки)
+    plot_reference_signals(
+        plt_figure,
+        (num_plots, num_cols, 1 + col_offset),
+        ref_by_micro_volumed_channel,
+        ref_by_micro_volumed_delayed_channel,
+        frame_rate,
+        ref_delay_ms,
+        channel_num=channel_num
+    )
+    
+    # 2. График кросс-корреляции между обычным и сдвинутым референсными сигналами
+    plot_reference_correlation(
+        plt_figure,
+        (num_plots, num_cols, num_cols + 1 + col_offset),
+        ref_by_micro_volumed_channel,
+        ref_by_micro_volumed_delayed_channel,
+        frame_rate,
+        channel_num=channel_num
+    )
+    
+    # 3. График оригинального и на входе в микро референсных сигналов
+    plot_original_and_by_micro_volumed_reference_signals(
+        plt_figure,
+        (num_plots, num_cols, num_cols*2 + 1 + col_offset),
+        ref_channel,
+        ref_by_micro_volumed_channel,
+        frame_rate,
+        channel_num=channel_num
+    )
+    
+    # 4. График корреляции оригинального и на входе в микро референсных сигналов
+    plot_original_and_by_micro_volumed_reference_correlation(
+        plt_figure,
+        (num_plots, num_cols, num_cols*3 + 1 + col_offset),
+        ref_channel,
+        ref_by_micro_volumed_channel,
+        frame_rate,
+        channel_num=channel_num
+    )
+    
+    # 5. График оригинального референсного и входного сигналов
+    plot_original_reference_and_input_signals(
+        plt_figure,
+        (num_plots, num_cols, num_cols*4 + 1 + col_offset),
+        ref_by_micro_volumed_delayed_channel,
+        in_channel,
+        frame_rate,
+        channel_num=channel_num
+    )
+    
+    # 6. Исходные сигналы с указанием задержки
+    plot_original_signals(
+        plt_figure,
+        (num_plots, num_cols, num_cols*5 + 1 + col_offset),
+        ref_channel,
+        in_channel,
+        time_axis_ms,
+        delay_ms,
+        channel_num=channel_num
+    )
+    
+    # 7. Кросс-корреляция между входным и референсным сигналами
+    plot_input_reference_correlation(
+        plt_figure,
+        (num_plots, num_cols, num_cols*6 + 1 + col_offset),
+        lags,
+        correlation,
+        delay_ms,
+        confidence,
+        frame_rate,
+        channel_num=channel_num
+    )
+    
+    # 8. Сигналы после корректировки задержки
+    plot_corrected_signals(
+        plt_figure,
+        (num_plots, num_cols, num_cols*7 + 1 + col_offset),
+        ref_channel,
+        in_channel,
+        time_axis_ms,
+        lag,
+        delay_ms,
+        channel_num=channel_num
+    )
+    
+    # 9. Сравнение исходного и обработанного сигналов
+    plot_processed_signals(
+        plt_figure,
+        (num_plots, num_cols, num_cols*8 + 1 + col_offset),
+        in_channel,
+        processed_channel,
+        time_axis_ms,
+        frame_rate,
+        num_cols,  # передаем num_cols вместо n_channels
+        channel_num=channel_num
+    )
+    
+    # Возвращаем данные о задержке для использования в статистике
+    return lag, delay_ms, correlation, lags, confidence
+
 def visualize_audio_processing(
     output_dir: str,
-    reference_data: Optional[bytes] = None,
-    reference_file_path: Optional[str] = None,
-    reference_by_micro_volumed_data: Optional[bytes] = None,
-    reference_by_micro_volumed_file_path: Optional[str] = None,
-    reference_by_micro_volumed_delayed_data: Optional[bytes] = None,
-    reference_by_micro_volumed_delayed_file_path: Optional[str] = None,
-    input_data: Optional[bytes] = None,
+    reference_file_info: Optional[Dict[str, Any]],
+    reference_by_micro_volumed_file_info: Optional[Dict[str, Any]],
+    reference_by_micro_volumed_delayed_file_info: Optional[Dict[str, Any]],
+    original_input_file_info: Optional[Dict[str, Any]],
+    processed_file_info: Optional[Dict[str, Any]],
     input_file_path: Optional[str] = None,
-    processed_data: Optional[bytes] = None,
-    processed_file_path: Optional[str] = None,
     output_prefix: str = "aec",
-    sample_rate: int = 16000,
-    channels: int = 1,
+    frame_rate: int = 16000,
+    n_channels: int = 1,
     metrics: Optional[Dict[str, Any]] = None
 ):
     """
@@ -213,18 +394,14 @@ def visualize_audio_processing(
         reference_data: Данные оригинального референсного сигнала (байты)
         reference_file_path: Путь к оригинальному референсному файлу
         reference_by_micro_volumed_data: Данные референсного сигнала с измененной громкостью (байты)
-        reference_by_micro_volumed_file_path: Путь к файлу референсного сигнала с измененной громкостью
         reference_by_micro_volumed_delayed_data: Данные задержанного референсного сигнала (байты)
-        reference_by_micro_volumed_delayed_file_path: Путь к файлу задержанного референсного сигнала
         input_data: Входные данные (байты)
         input_file_path: Путь к входному файлу
         processed_data: Обработанные данные (байты)
-        processed_file_path: Путь к обработанному файлу
         reference_delayed_data: Устаревший параметр, используйте reference_by_micro_volumed_delayed_data
-        reference_delayed_file_path: Устаревший параметр, используйте reference_by_micro_volumed_delayed_file_path
         output_prefix: Префикс для имен выходных файлов
-        sample_rate: Частота дискретизации
-        channels: Количество каналов (1 для моно, 2 для стерео)
+        frame_rate: Частота дискретизации
+        n_channels: Количество каналов (1 для моно, 2 для стерео)
         metrics: Метрики обработки, включая данные корреляции
     """
     results = {}
@@ -234,412 +411,140 @@ def visualize_audio_processing(
         os.makedirs(output_dir, exist_ok=True)
         
         # Логируем полученную частоту дискретизации и количество каналов
-        logging.info(f"Получена частота дискретизации {sample_rate} Гц")
-        logging.info(f"Начальное количество каналов: {channels}")
+        logging.info(f"Получена частота дискретизации {frame_rate} Гц")
+        logging.info(f"Начальное количество каналов: {n_channels}")
         
-        # Если задан channels=1 (значение по умолчанию), пробуем определить из файлов
-        if channels == 1:
+        # Если задан n_channels=1 (значение по умолчанию), пробуем определить из файлов
+        if n_channels == 1:
             # Проверяем файлы для определения количества каналов через log_file_info
-            _, detected_channels = log_file_info(input_file_path, "Проверка каналов входного файла")
-            if detected_channels and detected_channels in [1, 2]:
-                channels = detected_channels
-                logging.info(f"visualize_audio_processing: Определено количество каналов из файла: {channels}")
+            _, detected_n_channels = log_file_info(input_file_path, "Проверка каналов входного файла")
+            if detected_n_channels and detected_n_channels in [1, 2]:
+                n_channels = detected_n_channels
+                logging.info(f"visualize_audio_processing: Определено количество каналов из файла: {n_channels}")
         
         # Проверяем корректность значения
-        if channels not in [1, 2]:
-            logging.warning(f"Неверное количество каналов ({channels}), используем значение по умолчанию: 1")
-            channels = 1
-
-        # Логируем информацию о файлах
-        ref_file_info, _ = log_file_info(reference_file_path, "Оригинальное референсное аудио")
-        ref_by_micro_volumed_file_info, _ = log_file_info(reference_by_micro_volumed_file_path, "Референсное аудио на входе в микро с измененной громкостью")
-        ref_by_micro_volumed_delayed_file_info, _ = log_file_info(reference_by_micro_volumed_delayed_file_path, "Референсное аудио на входе в микро с измененной громкостью и задержкой")
-        input_file_info, _ = log_file_info(input_file_path, "Входной файл")
-        processed_file_info, _ = log_file_info(processed_file_path, "Обработанный файл")
-
-        if ref_by_micro_volumed_delayed_file_info:
-            ref_by_micro_volumed_delayed_duration_ms = ref_by_micro_volumed_delayed_file_info['duration_ms']
-            
-            # Вычисляем разницу в длительности между референсным и задержанным референсным файлами
-            if 'reference' in ref_by_micro_volumed_delayed_file_info:
-                duration_diff_ms = ref_by_micro_volumed_delayed_file_info['duration_ms'] - ref_by_micro_volumed_delayed_file_info['reference']['duration_ms']
-                logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {duration_diff_ms:.2f} мс")
+        if n_channels not in [1, 2]:
+            logging.warning(f"Неверное количество каналов ({n_channels}), используем значение по умолчанию: 1")
+            n_channels = 1
 
         # Логируем размеры данных
-        if reference_by_micro_volumed_data:
-            logging.info(f"  Размер reference_by_micro_volumed_data: {len(reference_by_micro_volumed_data)} байт")
-        if input_data:
-            logging.info(f"  Размер input_data: {len(input_data)} байт")
-        
+        if reference_by_micro_volumed_file_info:
+            logging.info(f"  Размер reference_by_micro_volumed_data: {len(reference_by_micro_volumed_file_info['raw_frames'])} байт")
+        if original_input_file_info:
+            logging.info(f"  Размер input_data: {len(original_input_file_info['raw_frames'])} байт")
+
         # Передаем количество каналов в функцию bytes_to_numpy
-        ref_array = bytes_to_numpy(reference_data, sample_rate, channels)
-        ref_by_micro_volumed_array = bytes_to_numpy(reference_by_micro_volumed_data, sample_rate, channels)
-        ref_by_micro_volumed_delayed_array = bytes_to_numpy(reference_by_micro_volumed_delayed_data, sample_rate, channels)
-        in_array = bytes_to_numpy(input_data, sample_rate, channels)
-        processed_array = bytes_to_numpy(processed_data, sample_rate, channels)
+        ref_array = bytes_to_numpy(reference_file_info['raw_frames'], frame_rate, n_channels)
+        ref_by_micro_volumed_array = bytes_to_numpy(reference_by_micro_volumed_file_info['raw_frames'], frame_rate, n_channels)
+        ref_by_micro_volumed_delayed_array = bytes_to_numpy(reference_by_micro_volumed_delayed_file_info['raw_frames'], frame_rate, n_channels)
+        in_array = bytes_to_numpy(original_input_file_info['raw_frames'], frame_rate, n_channels)
+        processed_array = bytes_to_numpy(processed_file_info['raw_frames'], frame_rate, n_channels)
         
         # Логируем подробную информацию о массивах
-        logging.info(format_array_info("Референсный массив с измененной громкостью (ref_by_micro_volumed_array)", ref_by_micro_volumed_array, sample_rate))
-        logging.info(format_array_info("Задержанный референсный массив (ref_by_micro_volumed_delayed_array)", ref_by_micro_volumed_delayed_array, sample_rate))
-        logging.info(format_array_info("Входной массив (in_array)", in_array, sample_rate))
-        logging.info(format_array_info("Обработанный массив (processed_array)", processed_array, sample_rate))
+        logging.info(format_array_info("Референсный массив с измененной громкостью (ref_by_micro_volumed_array)", ref_by_micro_volumed_array, frame_rate))
+        logging.info(format_array_info("Задержанный референсный массив (ref_by_micro_volumed_delayed_array)", ref_by_micro_volumed_delayed_array, frame_rate))
+        logging.info(format_array_info("Входной массив (in_array)", in_array, frame_rate))
+        logging.info(format_array_info("Обработанный массив (processed_array)", processed_array, frame_rate))
         
         # Вычисляем длительность в зависимости от формата данных
         if len(ref_by_micro_volumed_array.shape) > 1:  # Стерео
-            ref_by_micro_volumed_duration = ref_by_micro_volumed_array.shape[0] / sample_rate
+            ref_by_micro_volumed_duration = ref_by_micro_volumed_array.shape[0] / frame_rate
         else:  # Моно
-            ref_by_micro_volumed_duration = len(ref_by_micro_volumed_array) / sample_rate
+            ref_by_micro_volumed_duration = len(ref_by_micro_volumed_array) / frame_rate
 
         if len(ref_by_micro_volumed_delayed_array.shape) > 1:  # Стерео
-            ref_by_micro_volumed_delayed_duration = ref_by_micro_volumed_delayed_array.shape[0] / sample_rate
+            ref_by_micro_volumed_delayed_duration = ref_by_micro_volumed_delayed_array.shape[0] / frame_rate
         else:  # Моно
-            ref_by_micro_volumed_delayed_duration = len(ref_by_micro_volumed_delayed_array) / sample_rate
+            ref_by_micro_volumed_delayed_duration = len(ref_by_micro_volumed_delayed_array) / frame_rate            
 
-        if len(in_array.shape) > 1:  # Стерео
-            in_duration = in_array.shape[0] / sample_rate
-        else:  # Моно
-            in_duration = len(in_array) / sample_rate
-            
-        logging.info(f"  Длительность ref_vol: {ref_by_micro_volumed_duration:.3f} сек")
-        logging.info(f"  Длительность in: {in_duration:.3f} сек")
-        logging.info(f"  Длительность ref_vol_delayed: {ref_by_micro_volumed_delayed_duration:.3f} сек")
+        duration_diff_ms = ref_by_micro_volumed_delayed_duration - ref_by_micro_volumed_duration
+        logging.info(f"Разница длительностей между референсным и задержанным референсным файлами: {duration_diff_ms:.2f} мс")
 
-        # Для каждого массива определяем одноканальную версию для отображения
-        if len(ref_array.shape) > 1:
-            ref_channel = ref_array[:, 0]  # Берем первый канал для отображения
-            ref_channel2 = ref_array[:, 1] if ref_array.shape[1] > 1 else None  # Берем второй канал, если он есть
-        else:
-            ref_channel = ref_array
-            ref_channel2 = None
-
-        if len(ref_by_micro_volumed_array.shape) > 1:
-            ref_by_micro_volumed_channel = ref_by_micro_volumed_array[:, 0]  # Берем первый канал для отображения
-            ref_by_micro_volumed_channel2 = ref_by_micro_volumed_array[:, 1] if ref_by_micro_volumed_array.shape[1] > 1 else None  # Второй канал
-        else:
-            ref_by_micro_volumed_channel = ref_by_micro_volumed_array
-            ref_by_micro_volumed_channel2 = None
-
-        if len(ref_by_micro_volumed_delayed_array.shape) > 1:
-            ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_array[:, 0]
-            ref_by_micro_volumed_delayed_channel2 = ref_by_micro_volumed_delayed_array[:, 1] if ref_by_micro_volumed_delayed_array.shape[1] > 1 else None
-        else:
-            ref_by_micro_volumed_delayed_channel = ref_by_micro_volumed_delayed_array
-            ref_by_micro_volumed_delayed_channel2 = None
-
-        if len(in_array.shape) > 1:
-            in_channel = in_array[:, 0]  # Берем первый канал для отображения
-            in_channel2 = in_array[:, 1] if in_array.shape[1] > 1 else None  # Берем второй канал, если он есть
-        else:
-            in_channel = in_array
-            in_channel2 = None
-
-        if len(processed_array.shape) > 1:
-            processed_channel = processed_array[:, 0]
-            processed_channel2 = processed_array[:, 1] if processed_array.shape[1] > 1 else None
-        else:
-            processed_channel = processed_array
-            processed_channel2 = None
-        
         # Проверяем наличие второго канала хотя бы в одном из сигналов
         has_second_channel = any([
-            ref_channel2 is not None,
-            ref_by_micro_volumed_channel2 is not None,
-            ref_by_micro_volumed_delayed_channel2 is not None,
-            in_channel2 is not None,
-            processed_channel2 is not None
+            len(ref_array.shape) > 1 and ref_array.shape[1] > 1,
+            len(ref_by_micro_volumed_array.shape) > 1 and ref_by_micro_volumed_array.shape[1] > 1,
+            len(ref_by_micro_volumed_delayed_array.shape) > 1 and ref_by_micro_volumed_delayed_array.shape[1] > 1,
+            len(in_array.shape) > 1 and in_array.shape[1] > 1,
+            len(processed_array.shape) > 1 and processed_array.shape[1] > 1
         ])
         
         logging.info(f"Наличие второго канала: {has_second_channel}")
 
-        # Вычисляем задержку между сигналами
-        if metrics and all(k in metrics for k in ['delay_samples', 'delay_ms', 'confidence', 'delay_correlation', 'delay_lags']):
-            # Используем предрассчитанные данны
-            lag = metrics['delay_samples']
-            delay_ms = metrics['delay_ms']
-            confidence = metrics['confidence']
-            correlation = metrics['delay_correlation']
-            lags = metrics['delay_lags']
-            logging.info(f"Используются предрассчитанные данные корреляции из AEC, задержка: {delay_ms:.2f} мс")
-        else:
-            # Если данные не предоставлены, рассчитываем корреляцию
-            lag, delay_ms, correlation, lags, confidence = calculate_signal_delay(in_channel, ref_channel, sample_rate)
-            logging.info(f"Корреляция была рассчитана внутри функции визуализации")
-        
-        # Если есть второй канал, также вычислим для него задержку
-        if has_second_channel and in_channel2 is not None and ref_channel2 is not None:
-            lag2, delay_ms2, correlation2, lags2, confidence2 = calculate_signal_delay(in_channel2, ref_channel2, sample_rate)
-            logging.info(f"Задержка для второго канала: {delay_ms2:.2f} мс (уверенность: {confidence2:.2f})")
-        else:
-            lag2, delay_ms2, correlation2, lags2, confidence2 = lag, delay_ms, correlation, lags, confidence
-        
-        # Вычисляем длительность сигналов в миллисекундах
-        ref_by_micro_volumed_duration_ms = len(ref_by_micro_volumed_array) * 1000 / sample_rate
-        if ref_by_micro_volumed_file_info:
-            assert ref_by_micro_volumed_duration_ms == ref_by_micro_volumed_file_info['duration_ms']
+        # Вычисляем длительность сигналов в миллисекундах для лога
+        ref_by_micro_volumed_duration_ms = len(ref_by_micro_volumed_array) * 1000 / frame_rate
 
-        in_duration_ms = len(in_array) * 1000 / sample_rate
-        if input_file_info:
-            assert in_duration_ms == input_file_info['duration_ms']
+        in_duration_ms = len(in_array) * 1000 / frame_rate
 
-        ref_by_micro_volumed_delayed_duration_ms = len(ref_by_micro_volumed_delayed_array) * 1000 / sample_rate
-        if ref_by_micro_volumed_delayed_file_info:
-            assert ref_by_micro_volumed_delayed_duration_ms == ref_by_micro_volumed_delayed_file_info['duration_ms']
+        ref_by_micro_volumed_delayed_duration_ms = len(ref_by_micro_volumed_delayed_array) * 1000 / frame_rate
 
         # Логируем информацию о длительности
         logging.info(f"Длительность reference_by_micro_volumed.wav: {ref_by_micro_volumed_duration_ms:.2f} мс")
         logging.info(f"Длительность original_input.wav: {in_duration_ms:.2f} мс")
         logging.info(f"Длительность reference_by_micro_volumed_delayed.wav: {ref_by_micro_volumed_delayed_duration_ms:.2f} мс")
-        logging.info(f"Длительность processed_input.wav: {len(processed_channel) * 1000 / sample_rate:.2f} мс")
-
-        # Проверяем и согласовываем длины массивов
-        if len(in_channel) != len(processed_channel):
-            logging.warning(f"Размеры входного ({len(in_channel)}) и обработанного ({len(processed_channel)}) сигналов не совпадают!")
-            logging.info("Приведение длины массивов для корректного отображения...")
         
-        # Находим минимальную длину массивов для корректного отображения
-        min_display_length = min(len(ref_channel), len(in_channel), len(processed_channel))
-        logging.info(f"Минимальная длина массивов для отображения: {min_display_length} семплов")
-
-        # Обрезаем массивы до минимальной длины
-        ref_channel = ref_channel[:min_display_length]
-        in_channel = in_channel[:min_display_length]
-        processed_channel = processed_channel[:min_display_length]
-
-        # Обрезаем массивы второго канала до минимальной длины
-        if has_second_channel:
-            min_display_length2 = min_display_length
-            if ref_channel2 is not None:
-                ref_channel2 = ref_channel2[:min_display_length2]
-            if in_channel2 is not None:
-                in_channel2 = in_channel2[:min_display_length2]
-            if processed_channel2 is not None:
-                processed_channel2 = processed_channel2[:min_display_length2]
-            if ref_by_micro_volumed_channel2 is not None:
-                ref_by_micro_volumed_channel2 = ref_by_micro_volumed_channel2[:min_display_length2]
-            if ref_by_micro_volumed_delayed_channel2 is not None:
-                ref_by_micro_volumed_delayed_channel2 = ref_by_micro_volumed_delayed_channel2[:min_display_length2]
-
+        # Проверяем минимальную длину для создания временной оси
+        min_length = min(
+            len(ref_array.flatten()) if len(ref_array.shape) > 0 else 0,
+            len(ref_by_micro_volumed_array.flatten()) if len(ref_by_micro_volumed_array.shape) > 0 else 0,
+            len(ref_by_micro_volumed_delayed_array.flatten()) if len(ref_by_micro_volumed_delayed_array.shape) > 0 else 0,
+            len(in_array.flatten()) if len(in_array.shape) > 0 else 0,
+            len(processed_array.flatten()) if len(processed_array.shape) > 0 else 0
+        )
+        
         # Создаем временную ось подходящей длины
-        time_axis = np.arange(min_display_length) / sample_rate
+        time_axis = np.arange(min_length // (1 if n_channels == 1 else 2)) / frame_rate
         # Создаем временную ось в миллисекундах
         time_axis_ms = time_axis * 1000  # Преобразуем секунды в миллисекунды
+        
+        logging.info(f"Создана временная ось длиной {len(time_axis_ms)} точек")
         
         # Определяем количество графиков
         num_plots = 9  # Базовое количество графиков
         
+        # Определяем количество колонок в зависимости от наличия второго канала
+        num_cols = 2 if has_second_channel else 1
+
         # Создаем график с учетом второго канала
         fig_width = 20 if has_second_channel else 12  # Шире если есть второй канал
         fig_height = 4 * num_plots  # Высота остается прежней
         
         plt.figure(figsize=(fig_width, fig_height))
-        
-        # Количество колонок
-        num_cols = 2 if has_second_channel else 1
-        
-        # 1. График двух референсных сигналов на входе в микро (до и после задержки)
-        plot_reference_signals(
+
+        # Визуализируем первый канал и получаем данные о задержке
+        lag, delay_ms, correlation, lags, confidence = visualize_one_channel(
             plt,
-            (num_plots, num_cols, 1),
-            ref_by_micro_volumed_channel,
-            ref_by_micro_volumed_delayed_channel,
-            sample_rate,
-            ref_delay_ms if 'ref_delay_ms' in locals() else None,
-            channel_num=1
+            channel_num=1,
+            num_plots=num_plots,
+            num_cols=num_cols,
+            ref_array=ref_array,
+            ref_by_micro_volumed_array=ref_by_micro_volumed_array,
+            ref_by_micro_volumed_delayed_array=ref_by_micro_volumed_delayed_array,
+            in_array=in_array,
+            processed_array=processed_array,
+            time_axis_ms=time_axis_ms,
+            frame_rate=frame_rate,
+            metrics=metrics,
+            ref_delay_ms=None if 'ref_delay_ms' not in locals() else ref_delay_ms
         )
         
-        # Если есть второй канал, отображаем дополнительный график
-        if has_second_channel and ref_by_micro_volumed_channel2 is not None and ref_by_micro_volumed_delayed_channel2 is not None:
-            plot_reference_signals(
+        # Если есть второй канал, визуализируем его
+        if has_second_channel:
+            visualize_one_channel(
                 plt,
-                (num_plots, num_cols, 2),
-                ref_by_micro_volumed_channel2,
-                ref_by_micro_volumed_delayed_channel2,
-                sample_rate,
-                ref_delay_ms if 'ref_delay_ms' in locals() else None,
-                channel_num=2
-        )
-        
-        # 2. График кросс-корреляции между обычным и сдвинутым референсными сигналами
-        plot_reference_correlation(
-            plt,
-            (num_plots, num_cols, num_cols + 1),
-            ref_by_micro_volumed_channel,
-            ref_by_micro_volumed_delayed_channel,
-            sample_rate,
-            channel_num=1
-        )
-        
-        # Кросс-корреляция для второго канала, если он есть
-        if has_second_channel and ref_by_micro_volumed_channel2 is not None and ref_by_micro_volumed_delayed_channel2 is not None:
-            ref_delay_ms2 = plot_reference_correlation(
-                plt,
-                (num_plots, num_cols, num_cols + 2),
-                ref_by_micro_volumed_channel2,
-                ref_by_micro_volumed_delayed_channel2,
-                sample_rate,
-                channel_num=2
+                channel_num=2,
+                num_plots=num_plots,
+                num_cols=num_cols,
+                ref_array=ref_array,
+                ref_by_micro_volumed_array=ref_by_micro_volumed_array,
+                ref_by_micro_volumed_delayed_array=ref_by_micro_volumed_delayed_array,
+                in_array=in_array,
+                processed_array=processed_array,
+                time_axis_ms=time_axis_ms,
+                frame_rate=frame_rate,
+                metrics=metrics,
+                ref_delay_ms=None if 'ref_delay_ms' not in locals() else ref_delay_ms
             )
-        
-        # 3. График оригинального и на входе в микро референсных сигналов
-        plot_original_and_by_micro_volumed_reference_signals(
-            plt,
-            (num_plots, num_cols, num_cols*2 + 1),
-            ref_channel,
-            ref_by_micro_volumed_channel,
-            sample_rate,
-            channel_num=1
-        )
-        
-        # Тот же график для второго канала
-        if has_second_channel and ref_channel2 is not None and ref_by_micro_volumed_channel2 is not None:
-            plot_original_and_by_micro_volumed_reference_signals(
-                plt,
-                (num_plots, num_cols, num_cols*2 + 2),
-                ref_channel2,
-                ref_by_micro_volumed_channel2,
-                sample_rate,
-                channel_num=2
-            )
-        
-        # 4. График корреляции оригинального и на входе в микро референсных сигналов
-        plot_original_and_by_micro_volumed_reference_correlation(
-            plt,
-            (num_plots, num_cols, num_cols*3 + 1),
-            ref_channel,
-            ref_by_micro_volumed_channel,
-            sample_rate,
-            channel_num=1
-        )
-        
-        # Корреляция для второго канала
-        if has_second_channel and ref_channel2 is not None and ref_by_micro_volumed_channel2 is not None:
-            plot_original_and_by_micro_volumed_reference_correlation(
-                plt,
-                (num_plots, num_cols, num_cols*3 + 2),
-                ref_channel2,
-                ref_by_micro_volumed_channel2,
-                sample_rate,
-                channel_num=2
-            )
-        
-        # 5. График оригинального референсного и входного сигналов
-        plot_original_reference_and_input_signals(
-            plt,
-            (num_plots, num_cols, num_cols*4 + 1),
-            ref_by_micro_volumed_delayed_channel,
-            in_channel,
-            sample_rate,
-            channel_num=1
-        )
-        
-        # График для второго канала
-        if has_second_channel and ref_by_micro_volumed_delayed_channel2 is not None and in_channel2 is not None:
-            plot_original_reference_and_input_signals(
-                plt,
-                (num_plots, num_cols, num_cols*4 + 2),
-                ref_by_micro_volumed_delayed_channel2,
-                in_channel2,
-                sample_rate,
-                channel_num=2
-        )
-
-        # 6. Исходные сигналы с указанием задержки
-        plot_original_signals(
-            plt,
-            (num_plots, num_cols, num_cols*5 + 1),
-            ref_channel,
-            in_channel,
-            time_axis_ms,
-            delay_ms,
-            channel_num=1
-        )
-        
-        # График для второго канала
-        if has_second_channel and ref_channel2 is not None and in_channel2 is not None:
-            plot_original_signals(
-                plt,
-                (num_plots, num_cols, num_cols*5 + 2),
-                ref_channel2,
-                in_channel2,
-                time_axis_ms,
-                delay_ms2,
-                channel_num=2
-        )
-
-        # 7. Кросс-корреляция между входным и референсным сигналами
-        plot_input_reference_correlation(
-            plt,
-            (num_plots, num_cols, num_cols*6 + 1),
-            lags,
-            correlation,
-            delay_ms,
-            confidence,
-            sample_rate,
-            channel_num=1
-        )
-        
-        # Корреляция для второго канала
-        if has_second_channel and in_channel2 is not None and ref_channel2 is not None:
-            plot_input_reference_correlation(
-                plt,
-                (num_plots, num_cols, num_cols*6 + 2),
-                lags2,
-                correlation2,
-                delay_ms2,
-                confidence2,
-                sample_rate,
-                channel_num=2
-        )
-
-        # 8. Сигналы после корректировки задержки
-        plot_corrected_signals(
-            plt,
-            (num_plots, num_cols, num_cols*7 + 1),
-            ref_channel,
-            in_channel,
-            time_axis_ms,
-            lag,
-            delay_ms,
-            channel_num=1
-        )
-        
-        # График для второго канала
-        if has_second_channel and ref_channel2 is not None and in_channel2 is not None:
-            plot_corrected_signals(
-                plt,
-                (num_plots, num_cols, num_cols*7 + 2),
-                ref_channel2,
-                in_channel2,
-                time_axis_ms,
-                lag2,
-                delay_ms2,
-                channel_num=2
-        )
-
-        # 9. Сравнение исходного и обработанного сигналов
-        plot_processed_signals(
-            plt,
-            (num_plots, num_cols, num_cols*8 + 1),
-            in_channel,
-            processed_channel,
-            time_axis_ms,
-            sample_rate,
-            channels,
-            channel_num=1
-        )
-        
-        # График для второго канала
-        if has_second_channel and in_channel2 is not None and processed_channel2 is not None:
-            plot_processed_signals(
-                plt,
-                (num_plots, num_cols, num_cols*8 + 2),
-                in_channel2,
-                processed_channel2,
-                time_axis_ms,
-                sample_rate,
-                channels,
-                channel_num=2
-        )
 
         plt.tight_layout()
         signals_file = os.path.join(output_dir, f'{output_prefix}_signals.png')
@@ -665,14 +570,14 @@ def visualize_audio_processing(
         logging.exception("Подробная информация об ошибке:")
 
 
-def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
+def bytes_to_numpy(audio_bytes, frame_rate=16000, n_channels=2):
     """
     Преобразует аудио-данные из байтов в numpy массив.
     
     Args:
         audio_bytes: Аудио-данные в формате байтов
-        sample_rate: Частота дискретизации
-        channels: Количество каналов (1 для моно, 2 для стерео)
+        frame_rate: Частота дискретизации
+        n_channels: Количество каналов (1 для моно, 2 для стерео)
         
     Returns:
         numpy.ndarray: Аудио-данные в формате numpy массива
@@ -705,7 +610,7 @@ def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
             return np.array([], dtype=np.float32)
         
         # Преобразуем одномерный массив в двумерный для стерео данных
-        if channels == 2:
+        if n_channels == 2:
             # Проверяем, что длина массива четная
             if len(audio_array) % 2 == 0:
                 # Преобразуем в массив [n_samples, 2]
@@ -719,9 +624,9 @@ def bytes_to_numpy(audio_bytes, sample_rate=16000, channels=2):
     
         # Вычисляем длительность в зависимости от формата данных
         if len(audio_array.shape) > 1:  # Стерео
-            duration = audio_array.shape[0] / sample_rate
+            duration = audio_array.shape[0] / frame_rate
         else:  # Моно
-            duration = len(audio_array) / sample_rate
+            duration = len(audio_array) / frame_rate
             
         logging.info(f"bytes_to_numpy: Длительность: {duration:.3f} сек")
         
