@@ -94,7 +94,7 @@ def find_test_directories(base_dir="tests"):
     test_dirs = {}
     
     # Главные директории тестов
-    main_test_dirs = ["music", "agent_speech", "agent_user_speech"]
+    main_test_dirs = ["music", "agent_speech", "agent_user_speech", "agent_speech_30_sec"]
     
     for main_dir in main_test_dirs:
         main_dir_path = os.path.join(base_dir, main_dir)
@@ -102,42 +102,90 @@ def find_test_directories(base_dir="tests"):
             logging.warning(f"Директория {main_dir_path} не существует, пропускаем")
             continue
         
-        # Ищем поддиректории типа clear_reference и reference_by_micro
-        ref_types = ["clear_reference", "reference_by_micro"]
-        found_sub_dirs = []
-        
-        for ref_type in ref_types:
-            ref_type_path = os.path.join(main_dir_path, ref_type)
-            if not os.path.exists(ref_type_path):
-                logging.warning(f"Директория {ref_type_path} не существует, пропускаем")
-                continue
+        # Проверяем наличие mono/stereo поддиректорий для определенных типов тестов
+        if main_dir in ["agent_speech", "agent_user_speech", "agent_speech_30_sec"]:
+            # Проверяем наличие mono/stereo поддиректорий
+            channel_dirs = ["mono", "stereo"]
+            has_channel_dirs = False
             
-            if ref_type == "clear_reference":
-                # Для clear_reference ищем директории с уровнями громкости (volume_XX)
-                for d in os.listdir(ref_type_path):
-                    sub_dir_path = os.path.join(ref_type_path, d)
-                    if os.path.isdir(sub_dir_path) and d.startswith("volume_"):
-                        found_sub_dirs.append(sub_dir_path)
-                        logging.info(f"Найдена директория: {sub_dir_path}")
-            else:
-                # Для reference_by_micro сначала ищем директории с задержками (delay_XX)
-                for delay_dir in os.listdir(ref_type_path):
-                    delay_dir_path = os.path.join(ref_type_path, delay_dir)
-                    if os.path.isdir(delay_dir_path) and delay_dir.startswith("delay_"):
-                        # Внутри директории с задержкой ищем директории с уровнями громкости
-                        for vol_dir in os.listdir(delay_dir_path):
-                            vol_dir_path = os.path.join(delay_dir_path, vol_dir)
-                            if os.path.isdir(vol_dir_path) and vol_dir.startswith("volume_"):
-                                found_sub_dirs.append(vol_dir_path)
-                                logging.info(f"Найдена директория: {vol_dir_path}")
-        
-        if found_sub_dirs:
-            test_dirs[main_dir] = found_sub_dirs
-            logging.info(f"Найдено {len(found_sub_dirs)} поддиректорий в {main_dir}")
+            for channel_dir in channel_dirs:
+                channel_dir_path = os.path.join(main_dir_path, channel_dir)
+                if os.path.exists(channel_dir_path) and os.path.isdir(channel_dir_path):
+                    has_channel_dirs = True
+                    logging.info(f"Найдена поддиректория {channel_dir} в {main_dir_path}")
+                    
+                    # Обрабатываем поддиректорию с указанным channel_dir
+                    found_sub_dirs = find_test_subdirectories(channel_dir_path)
+                    
+                    if found_sub_dirs:
+                        # Используем main_dir/channel_dir как ключ для словаря
+                        test_dirs[f"{main_dir}/{channel_dir}"] = found_sub_dirs
+                        logging.info(f"Найдено {len(found_sub_dirs)} поддиректорий в {main_dir}/{channel_dir}")
+                    else:
+                        logging.warning(f"В директории {channel_dir_path} не найдено поддиректорий с тестовыми данными")
+            
+            # Если не найдены mono/stereo поддиректории, обрабатываем как обычную директорию
+            if not has_channel_dirs:
+                found_sub_dirs = find_test_subdirectories(main_dir_path)
+                
+                if found_sub_dirs:
+                    test_dirs[main_dir] = found_sub_dirs
+                    logging.info(f"Найдено {len(found_sub_dirs)} поддиректорий в {main_dir}")
+                else:
+                    logging.warning(f"В директории {main_dir_path} не найдено поддиректорий с тестовыми данными")
         else:
-            logging.warning(f"В директории {main_dir_path} не найдено поддиректорий с тестовыми данными")
+            # Для директорий без mono/stereo (например, music) - обычная обработка
+            found_sub_dirs = find_test_subdirectories(main_dir_path)
+            
+            if found_sub_dirs:
+                test_dirs[main_dir] = found_sub_dirs
+                logging.info(f"Найдено {len(found_sub_dirs)} поддиректорий в {main_dir}")
+            else:
+                logging.warning(f"В директории {main_dir_path} не найдено поддиректорий с тестовыми данными")
     
     return test_dirs
+
+def find_test_subdirectories(base_dir):
+    """
+    Находит все поддиректории в тестовой директории
+    
+    Args:
+        base_dir: Путь к тестовой директории
+        
+    Returns:
+        list: Список поддиректорий
+    """
+    found_sub_dirs = []
+    
+    # Ищем поддиректории типа clear_reference и reference_by_micro
+    ref_types = ["clear_reference", "reference_by_micro"]
+    
+    for ref_type in ref_types:
+        ref_type_path = os.path.join(base_dir, ref_type)
+        if not os.path.exists(ref_type_path):
+            logging.warning(f"Директория {ref_type_path} не существует, пропускаем")
+            continue
+        
+        if ref_type == "clear_reference":
+            # Для clear_reference ищем директории с уровнями громкости (volume_XX)
+            for d in os.listdir(ref_type_path):
+                sub_dir_path = os.path.join(ref_type_path, d)
+                if os.path.isdir(sub_dir_path) and d.startswith("volume_"):
+                    found_sub_dirs.append(sub_dir_path)
+                    logging.info(f"Найдена директория: {sub_dir_path}")
+        else:
+            # Для reference_by_micro сначала ищем директории с задержками (delay_XX)
+            for delay_dir in os.listdir(ref_type_path):
+                delay_dir_path = os.path.join(ref_type_path, delay_dir)
+                if os.path.isdir(delay_dir_path) and delay_dir.startswith("delay_"):
+                    # Внутри директории с задержкой ищем директории с уровнями громкости
+                    for vol_dir in os.listdir(delay_dir_path):
+                        vol_dir_path = os.path.join(delay_dir_path, vol_dir)
+                        if os.path.isdir(vol_dir_path) and vol_dir.startswith("volume_"):
+                            found_sub_dirs.append(vol_dir_path)
+                            logging.info(f"Найдена директория: {vol_dir_path}")
+    
+    return found_sub_dirs
 
 def process_audio_with_aec(
         processed_file_path,
@@ -209,7 +257,7 @@ def process_audio_with_aec(
         delay_samples, delay_ms, confidence = aec_session.auto_set_delay(
             reference_file_info['raw_frames'],
             original_input_file_info['raw_frames'],
-            actual_delay_ms=0,
+            actual_delay_ms=890,
         )
         logging.info(f"Обнаружена задержка: {delay_samples} семплов ({delay_ms:.2f} мс), уверенность: {confidence:.4f}")
         
@@ -807,8 +855,26 @@ def process_directory_by_level(dir_path, args):
     # Словарь для хранения результатов обработки
     results = {}
     
+    # Проверяем, является ли текущая директория директорией типа mono или stereo
+    if dir_name in ["mono", "stereo"]:
+        logging.info(f"Обнаружена директория для канального формата: {dir_path}")
+        
+        # Устанавливаем количество каналов
+        n_channels = 1 if dir_name == "mono" else 2
+        logging.info(f"Установлено количество каналов: {n_channels}")
+        
+        # Ищем поддиректории reference_by_micro и clear_reference
+        for item in os.listdir(dir_path):
+            item_path = os.path.join(dir_path, item)
+            if os.path.isdir(item_path) and item in ["reference_by_micro", "clear_reference"]:
+                logging.info(f"Обрабатываем поддиректорию {item}: {item_path}")
+                # Рекурсивно вызываем для обработки reference_by_micro и clear_reference директорий
+                subdir_results = process_directory_by_level(item_path, args)
+                # Объединяем результаты
+                results.update(subdir_results)
+    
     # Проверяем, является ли текущая директория директорией с уровнем громкости (volume_XX)
-    if dir_name.startswith("volume_"):
+    elif dir_name.startswith("volume_"):
         logging.info(f"Обнаружена директория с уровнем громкости: {dir_path}")
         # Всегда сохраняем результаты в той же директории, где находятся файлы
         output_dir = dir_path
@@ -860,19 +926,48 @@ def process_directory_by_level(dir_path, args):
                     # Объединяем результаты
                     results.update(delay_results)
         
-    # Проверяем, является ли текущая директория корневой директорией тестового сценария (music, agent_speech, agent_user_speech)
-    elif dir_name in ["music", "agent_speech", "agent_user_speech"]:
+    # Проверяем, является ли текущая директория корневой директорией тестового сценария
+    elif dir_name in ["music", "agent_speech", "agent_user_speech", "agent_speech_30_sec"]:
         logging.info(f"Обнаружена корневая директория тестового сценария: {dir_path}")
-        # Ищем поддиректории reference_by_micro и clear_reference
-        for item in os.listdir(dir_path):
-            item_path = os.path.join(dir_path, item)
-            if os.path.isdir(item_path) and item in ["reference_by_micro", "clear_reference"]:
-                logging.info(f"Обрабатываем поддиректорию {item}: {item_path}")
-                # Рекурсивно вызываем для обработки reference_by_micro и clear_reference директорий
-                subdir_results = process_directory_by_level(item_path, args)
-                # Объединяем результаты
-                results.update(subdir_results)
         
+        # Проверяем наличие mono/stereo директорий для определенных типов тестов
+        if dir_name in ["agent_speech", "agent_user_speech", "agent_speech_30_sec"]:
+            # Сначала проверяем наличие mono/stereo поддиректорий
+            channel_dirs = ["mono", "stereo"]
+            has_channel_dirs = False
+            
+            for channel_dir in channel_dirs:
+                channel_dir_path = os.path.join(dir_path, channel_dir)
+                if os.path.exists(channel_dir_path) and os.path.isdir(channel_dir_path):
+                    has_channel_dirs = True
+                    logging.info(f"Обрабатываем поддиректорию {channel_dir}: {channel_dir_path}")
+                    # Рекурсивно вызываем для обработки mono/stereo директорий
+                    channel_results = process_directory_by_level(channel_dir_path, args)
+                    # Объединяем результаты
+                    results.update(channel_results)
+                    
+            # Если нет mono/stereo поддиректорий, ищем стандартные reference_by_micro и clear_reference
+            if not has_channel_dirs:
+                # Ищем поддиректории reference_by_micro и clear_reference
+                for item in os.listdir(dir_path):
+                    item_path = os.path.join(dir_path, item)
+                    if os.path.isdir(item_path) and item in ["reference_by_micro", "clear_reference"]:
+                        logging.info(f"Обрабатываем поддиректорию {item}: {item_path}")
+                        # Рекурсивно вызываем для обработки reference_by_micro и clear_reference директорий
+                        subdir_results = process_directory_by_level(item_path, args)
+                        # Объединяем результаты
+                        results.update(subdir_results)
+        else:
+            # Для директорий без mono/stereo структуры (например, music)
+            # Ищем поддиректории reference_by_micro и clear_reference
+            for item in os.listdir(dir_path):
+                item_path = os.path.join(dir_path, item)
+                if os.path.isdir(item_path) and item in ["reference_by_micro", "clear_reference"]:
+                    logging.info(f"Обрабатываем поддиректорию {item}: {item_path}")
+                    # Рекурсивно вызываем для обработки reference_by_micro и clear_reference директорий
+                    subdir_results = process_directory_by_level(item_path, args)
+                    # Объединяем результаты
+                    results.update(subdir_results)
     else:
         # Если директория не соответствует известной структуре, пробуем обработать как обычную директорию
         logging.warning(f"Директория {dir_path} не соответствует известной структуре тестов")
@@ -882,7 +977,7 @@ def process_directory_by_level(dir_path, args):
         reference_file_path_path = os.path.join(dir_path, "reference.wav")
         original_input_file_path = os.path.join(dir_path, "original_input.wav")
         
-        if os.path.exists(reference_file_path) and os.path.exists(original_input_file_path):
+        if os.path.exists(reference_file_path_path) and os.path.exists(original_input_file_path):
             logging.info(f"Найдены необходимые файлы в директории {dir_path}, обрабатываем")
             # Всегда сохраняем результаты в исходной директории
             output_dir = dir_path
